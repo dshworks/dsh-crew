@@ -52,7 +52,18 @@ job is carrying terminal bytes.
   write as the message for exactly one day of green tests, and against
   both real products that submitted nothing at all. Where a wire shape is
   the fix, assert the wire shape — see the two-writes test in
-  `tests/tools.spec.mjs`.
+  `tests/tools.spec.mjs` — and then run the products:
+
+  ```sh
+  CREW_REAL_CLI=1 pnpm test
+  ```
+
+  `tests/real-cli.spec.mjs` seats each of `claude` and `codex` in a fresh
+  temporary workspace, answers whatever dialog it opens on, and makes it
+  answer a two-line message foreground and background. It is opt-in because
+  it needs credentials and spends model tokens; the temporary workspace is
+  deliberate, so answering a product's trust prompt in a test never leaves a
+  real project marked trusted.
 - Security changes get a test that fails without the fix. `lib/trust.js`
   is the file where a plausible-looking simplification is most likely to
   be a hole — the `application/json` requirement and the `Host` check are

@@ -289,5 +289,10 @@ describe('teardown', () => {
       }
     })
     // afterEach closes again; closeAll is idempotent by contract.
-  })
+    //
+    // The budget has to clear `graceMs` with room to spare: an interactive bash
+    // ignores SIGTERM, so this pane is always the SIGKILL escalation three
+    // seconds later, and the default per-test limit would cut `until`'s own
+    // deadline off before it could ever be reached.
+  }, 20_000)
 })

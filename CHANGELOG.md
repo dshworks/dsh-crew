@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.2.0 — 2026-08-17
+
+Background delegation, and the corrections that only the real products
+reveal.
+
+- **Background delegation on the harness's job seam.** `crew_send(…,
+  run_in_background: true)` returns a job id instead of blocking the turn:
+  the model keeps working, the completion notice wakes it, and
+  `job_output` collects what the crew member said. `job_kill` stops the
+  watch, sends SIGINT to the pane's foreground, and leaves the pane
+  **seated** — a cancelled delegation is not a reason to close a terminal
+  someone is watching, and whether that signal ends the crew member's turn
+  is the product's own decision. Needs `ctx.jobs` plus a job controller the
+  calling agent can reach, and says so plainly when either is missing;
+  `enableRunInBackground: false` removes the parameter.
+- **A send returns the new lines, not the whole viewport.** The screen is
+  diffed against a mark taken just before typing, so the model reads the
+  answer instead of finding it again inside a banner it has already seen.
+  A CLI that repaints in place yields no usable delta and gets the
+  viewport, which `screen` carries either way.
+- **Three corrections only the real products show.** Enter is written
+  separately from the message — both read one burst ending in a carriage
+  return as a *paste*, so a single write fills the composer and submits
+  nothing, and the quiet pane then reads as an answer. Seating waits for a
+  painted screen, not merely a quiet one. And a first screen that is a
+  dialog — the trust prompt an untrusted directory produces — is handed to
+  the caller to answer with `crew_send` (empty message = Enter) rather than
+  answered by the plugin. `bash` cannot see any of the three, so
+  `tests/real-cli.spec.mjs` seats the real `claude` and `codex` behind
+  `CREW_REAL_CLI=1`.
+
 ## 0.1.0 — 2026-08-16
 
 First release, as `@dshworks/dsh-crew`.

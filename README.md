@@ -64,6 +64,7 @@ run the team:
 crew_list                              → who can be seated, who already is
 crew_seat(agent: "claude")             → starts a pane, returns its id + first screen
 crew_send(pane: "…", message: "…")     → types it, presses Enter, waits for quiet
+crew_send(…, run_in_background: true)  → returns a job id; the answer arrives as a notice
 crew_peek(pane: "…")                   → the screen right now, as the human sees it
 crew_dismiss(pane: "…")                → ends the process
 ```
@@ -83,8 +84,8 @@ so `crew_send` returns when the pane **settles** — the rendered screen
 unchanged for a quiet period. On timeout it says so and tells the model to
 `crew_peek` later; the crew member keeps working.
 
-"Quiet" alone is not enough in either direction, and both corrections came
-from real CLIs rather than from the test shell:
+"Quiet" alone is not enough in either direction, and all three corrections
+came from real CLIs rather than from the test shell:
 
 - **Enter is typed separately from the message.** Both products read one
   burst ending in a carriage return as a *paste* and keep the return as a
@@ -94,6 +95,46 @@ from real CLIs rather than from the test shell:
 - **An unpainted screen is not a settled one.** A CLI that has not drawn
   its first frame is perfectly quiet, so seating waits for content as well
   as calm before reporting a crew member ready.
+- **The first screen may be a dialog, and the plugin will not answer it.**
+  In a directory it has not been trusted in, each product opens on its own
+  trust prompt instead of a composer. The tools say so and hand it to the
+  caller: answer the dialog with `crew_send` — an empty message presses
+  Enter — and send the task only once the composer is up. A task sent into
+  a dialog is typed *into* the dialog, and its digits can pick an option;
+  that is how a "count from 1 to 12" prompt once chose *2. No, quit*.
+  Auto-answering a product's trust prompt is not the plugin's decision to
+  make.
+
+### Sending in the background
+
+`crew_send` with `run_in_background: true` puts the same wait on the
+harness's job seam instead of the calling turn:
+
+```text
+crew_send(pane, message, run_in_background: true)
+  → started crew job crew-1 — job_output to read, crew_peek to watch
+  … the model keeps working; the human watches the pane …
+  → background job crew-1 (crew: Codex ← Reply with exactly …) finished
+  → job_output(crew-1) → what the crew member said
+```
+
+The job is owned by the calling agent, so `job_list` and `job_output`
+follow the harness's own session fence, and the completion notice wakes an
+idle model rather than being lost. `job_kill` stops the watch, sends SIGINT
+to the pane's foreground, and leaves the pane **seated** — a cancelled
+delegation is not a reason to close a terminal someone is watching. Whether
+that SIGINT also ends the crew member's current turn is the product's
+decision, and some of them listen for Escape instead; the pane staying open
+is what makes that recoverable, because the human can take the keyboard.
+It needs `ctx.jobs` and a job controller the calling agent can reach;
+without them the tool says exactly that instead of throwing. Set
+`enableRunInBackground: false` to remove the parameter.
+
+Either way the result is the **new** lines rather than the whole viewport:
+the screen is diffed against a mark taken just before typing, so the model
+reads the answer instead of finding it again inside a banner it has already
+seen. A CLI that repaints in place produces no usable delta, and then the
+viewport is returned as it always was — and `screen` carries it regardless.
 
 ### Why the host runs a second terminal emulator
 
@@ -148,6 +189,7 @@ false` removes one.
 | `maxPanesPerSession` | `6` | Panes one session may hold open at once. |
 | `graceMs` | `3000` | SIGTERM-to-SIGKILL grace when a pane closes. |
 | `tools` | `true` | Expose the five crew tools to the dsh agent. |
+| `enableRunInBackground` | `true` | Offer `crew_send`'s `run_in_background`. Needs the harness job seam. |
 
 ## Security
 
@@ -199,8 +241,14 @@ matters. See [SECURITY.md](SECURITY.md).
 
 ```sh
 pnpm install
-pnpm test      # 27 tests, against real PTYs, real sockets, and the real fence
+pnpm test                   # 33 tests, against real PTYs, real sockets, and the real fence
+CREW_REAL_CLI=1 pnpm test   # + 4 more that seat the real claude and codex
 ```
+
+The opt-in suite is where the wire shape stays honest: it seats each
+product in a throwaway workspace, answers whatever dialog it opens on, and
+makes it reply to a two-line message — foreground and background. It needs
+credentials and spends model tokens, which is why it is off by default.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 

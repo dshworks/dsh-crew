@@ -60,6 +60,7 @@ dsh --profile web
 crew_list                              → 谁能入座，谁已经在场
 crew_seat(agent: "claude")             → 开一个面板，返回它的 id 和第一屏
 crew_send(pane: "…", message: "…")     → 打字、回车，然后等它安静下来
+crew_send(…, run_in_background: true)  → 立刻返回一个 job id，答案随完成通知回来
 crew_peek(pane: "…")                   → 此刻的屏幕，和人看到的一模一样
 crew_dismiss(pane: "…")                → 结束这个进程
 ```
@@ -76,7 +77,7 @@ crew_dismiss(pane: "…")                → 结束这个进程
 即渲染出的屏幕在一段静默窗口内不再变化。超时了它会明说，
 并让模型稍后 `crew_peek`；成员那边照样继续干。
 
-但只看「安静」在两个方向上都不够，而这两处修正都来自真实 CLI，
+但只看「安静」在两个方向上都不够，而这三处修正都来自真实 CLI，
 不是来自测试用的那个 shell：
 
 - **回车和消息分两次写。** 两个产品都会把「一串字节以回车结尾」当成
@@ -85,6 +86,41 @@ crew_dismiss(pane: "…")                → 结束这个进程
   只按静默判定的话，模型拿回的就是自己那句还没发出去的问题。
 - **没画出来的屏幕不算安静。** 还没渲染出第一帧的 CLI 安静得很，
   所以入座要同时等到「有内容」和「静下来」，才算这个成员就位。
+- **第一屏可能是个对话框，而插件不会替你回答它。** 在还没被信任过的
+  目录里，两个产品打开的都是自己的信任提示，而不是输入框。工具会把这件事
+  说清楚，并把决定权交给调用方：先用 `crew_send` 回答对话框 ——
+  空消息就是按一下回车 —— 等输入框出来了再发任务。任务发进对话框，
+  就是被打进了对话框，而其中的数字还可能顺手选中一个选项：
+  「从 1 数到 12」这句话，就曾经选中过 *2. No, quit*。
+  替产品答信任提示，不是插件该做的决定。
+
+### 后台发送
+
+`crew_send` 带上 `run_in_background: true`，这份等待就从当前 turn
+挪到 harness 的 job 接缝上：
+
+```text
+crew_send(pane, message, run_in_background: true)
+  → started crew job crew-1 — job_output to read, crew_peek to watch
+  …… 模型继续干别的；人继续看着那个面板 ……
+  → background job crew-1 (crew: Codex ← Reply with exactly …) finished
+  → job_output(crew-1) → 成员说了什么
+```
+
+job 归调用的那个 agent 所有，所以 `job_list`、`job_output` 沿用 harness
+自己的会话围栏，完成通知也会唤醒空闲的模型，而不是丢掉。`job_kill`
+会停掉这份等待、向面板前台发 SIGINT，并让面板**继续在座** ——
+派活被取消，不构成关掉一个有人正在看的终端的理由。这个 SIGINT
+是否也终止了成员当前那一轮，由产品自己决定（有的只认 Esc）；
+而面板还开着，正是这件事仍然可挽回的原因：人随时可以接过键盘。
+它需要 `ctx.jobs` 以及调用方 agent 能够到的 job controller；
+缺了就如实说明，而不是抛异常。`enableRunInBackground: false`
+可以把这个参数整个去掉。
+
+两条路径返回的都是**新增**的那些行，而不是整屏：屏幕会与打字前取下的
+标记做差，于是模型读到的是答案本身，不必在自己早已看过的横幅里再找一遍。
+原地重绘的 CLI 算不出可用的差集，那就照旧返回整屏 ——
+而 `screen` 字段无论如何都带着它。
 
 ### 为什么宿主还要再跑一个终端模拟器
 
@@ -135,6 +171,7 @@ crew_dismiss(pane: "…")                → 结束这个进程
 | `maxPanesPerSession` | `6` | 单会话同时打开的面板上限 |
 | `graceMs` | `3000` | 关闭面板时从 SIGTERM 到 SIGKILL 的宽限 |
 | `tools` | `true` | 是否向 dsh agent 暴露这五个工具 |
+| `enableRunInBackground` | `true` | 是否提供 `crew_send` 的 `run_in_background`，需要 harness 的 job 接缝 |
 
 ## 安全
 
@@ -179,8 +216,13 @@ crew_dismiss(pane: "…")                → 结束这个进程
 
 ```sh
 pnpm install
-pnpm test      # 27 个测试，跑在真 PTY、真 socket 和真围栏上
+pnpm test                   # 33 个测试，跑在真 PTY、真 socket 和真围栏上
+CREW_REAL_CLI=1 pnpm test   # 再加 4 个：真的把 claude 和 codex 请进来
 ```
+
+那个可选套件是让「写到线上的字节」保持诚实的地方：它在一个临时工作目录里
+请每个产品入座，回答它开机时弹出的对话框，再让它回答一条两行的消息 ——
+前台和后台各一次。它需要凭据、要花模型 token，所以默认不跑。
 
 见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 

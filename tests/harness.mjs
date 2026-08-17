@@ -64,8 +64,54 @@ export function spawnTerminal(spec) {
 }
 
 /**
+ * A stand-in for the harness's background-job registry (`ctx.jobs`).
+ *
+ * It implements the producer side of the published `JobStart` contract, which is
+ * the half this plugin has to get right: `run()` is called once, synchronously,
+ * and must hand back `cancel` and `done` before `start` returns an id. What it
+ * deliberately does NOT emulate is the runtime's own half — the session fence,
+ * the controller requirement, completion notices — because a double cannot
+ * prove those and pretending to would only hide where they actually live.
+ * @returns {object} the service plus the records a test inspects.
+ */
+export function createJobsService() {
+  const records = []
+  return {
+    service: {
+      /**
+       * @param {object} spec - the `JobStart` a producer supplies.
+       * @returns {string} the issued job id.
+       */
+      start(spec) {
+        for (const key of ['kind', 'label']) {
+          if (typeof spec[key] !== 'string' || spec[key] === '') throw new Error(`a job needs a ${key}`)
+        }
+        if (typeof spec.run !== 'function') throw new Error('a job needs a starter')
+        const hooks = spec.run()
+        if (typeof hooks?.cancel !== 'function' || typeof hooks?.done?.then !== 'function') {
+          throw new Error('a job starter must return cancel and done')
+        }
+        const record = { id: `${spec.kind}-${records.length + 1}`, spec, hooks, outcome: undefined }
+        // The registry records the outcome and never lets `done` reject.
+        void hooks.done.then((outcome) => { record.outcome = outcome })
+        records.push(record)
+        return record.id
+      },
+    },
+    records,
+    /**
+     * @param {string} id - an issued job id.
+     * @returns {object | undefined} that job's record.
+     */
+    get(id) {
+      return records.find(record => record.id === id)
+    },
+  }
+}
+
+/**
  * A cordis-shaped context carrying only what this plugin injects.
- * @param {object} options - `sessions` map and the web server route tables.
+ * @param {object} options - `sessions` map, `jobs` service, and the web server route tables.
  * @returns {object} the context plus test-side controls.
  */
 export function createContext(options = {}) {
@@ -95,6 +141,9 @@ export function createContext(options = {}) {
       },
     },
     sessions: options.sessions,
+    // Absent unless a test supplies it: a deployment without the job seam is a
+    // real configuration, and `crew_send` has to say so rather than throw.
+    jobs: options.jobs,
   }
 
   const ctx = {

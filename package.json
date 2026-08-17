@@ -1,7 +1,7 @@
 {
   "name": "@dshworks/dsh-crew",
   "description": "Run Claude Code and Codex as live terminal panes beside dsh: a split view in the web UI, buttons to seat them, and tools that let the dsh agent hand them work and read their screens.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
   "publishConfig": {
     "access": "public"

@@ -12,7 +12,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { apply, Config } from '../lib/index.js'
-import { createContext, spawnTerminal } from './harness.mjs'
+import { createContext, createJobsService, spawnTerminal } from './harness.mjs'
 
 const SESSION = 'session-under-test'
 const OTHER = 'someone-elses-session'
@@ -47,16 +47,46 @@ function call(name, args, sessionId = SESSION) {
 /**
  * Stand up the plugin over a session table.
  * @param {Record<string, string | undefined>} workspaces - session id to cwd.
+ * @param {object} [options] - `jobs` service and `config` overrides.
  * @returns {object} the fixture.
  */
-function boot(workspaces = { [SESSION]: process.cwd(), [OTHER]: process.cwd() }) {
+function boot(workspaces = { [SESSION]: process.cwd(), [OTHER]: process.cwd() }, options = {}) {
   const local = createContext({
     sessions: {
       get: id => (id in workspaces ? { header: { cwd: workspaces[id] } } : undefined),
     },
+    jobs: options.jobs,
   })
-  apply(local.ctx, Config({ agents: [SHELL] }))
+  apply(local.ctx, Config({ agents: [SHELL], ...options.config }))
   return local
+}
+
+/**
+ * A fixture whose panes record every byte and signal sent to their child.
+ *
+ * What a pane puts on the wire is a contract in its own right: the shell these
+ * tests seat submits a line however it arrives, while the products this plugin
+ * exists to carry do not. So the wire shape is asserted directly.
+ * @param {object} [options] - `jobs` service and `config` overrides.
+ * @returns {object} the fixture, plus the recorded writes and signals.
+ */
+function bootWatchingTheWire(options = {}) {
+  const writes = []
+  const signals = []
+  const local = createContext({
+    sessions: { get: () => ({ header: { cwd: process.cwd() } }) },
+    jobs: options.jobs,
+    spawnTerminal: async (spec) => {
+      const handle = await spawnTerminal(spec)
+      return {
+        ...handle,
+        write: async (data) => { writes.push(data); return handle.write(data) },
+        signalForeground: async (signal) => { signals.push(signal); return handle.signalForeground(signal) },
+      }
+    },
+  })
+  apply(local.ctx, Config({ agents: [SHELL], ...options.config }))
+  return { local, writes, signals }
 }
 
 beforeEach(() => {
@@ -121,23 +151,41 @@ describe('the crew tools', () => {
     // return lands in the composer as a newline, the task is never sent, the
     // pane goes quiet, and `crew_send` reports the unsent question as settled.
     // The wire shape is therefore the contract, and this is where it is held.
-    const writes = []
-    const watched = createContext({
-      sessions: { get: () => ({ header: { cwd: process.cwd() } }) },
-      spawnTerminal: async (spec) => {
-        const handle = await spawnTerminal(spec)
-        return { ...handle, write: async (data) => { writes.push(data); return handle.write(data) } }
-      },
-    })
-    apply(watched.ctx, Config({ agents: [SHELL] }))
+    const { local, writes } = bootWatchingTheWire()
     const exec = execFor(SESSION)
-    const { paneId } = await watched.tools.get('crew_seat').execute({ agent: 'shell' }, exec)
+    const { paneId } = await local.tools.get('crew_seat').execute({ agent: 'shell' }, exec)
 
-    await watched.tools.get('crew_send').execute({ pane: paneId, message: 'echo two-writes-not-one' }, exec)
+    await local.tools.get('crew_send').execute({ pane: paneId, message: 'echo two-writes-not-one' }, exec)
     expect(writes).toEqual(['echo two-writes-not-one', '\r'])
 
-    await watched.close()
+    await local.close()
   }, 30_000)
+
+  it('presses Enter alone for an empty message, so a dialog can be answered', async () => {
+    // The first screen may be a trust prompt or a login wall rather than a
+    // composer. Answering it must not type anything into it.
+    const { local, writes } = bootWatchingTheWire()
+    const exec = execFor(SESSION)
+    const { paneId } = await local.tools.get('crew_seat').execute({ agent: 'shell' }, exec)
+
+    await local.tools.get('crew_send').execute({ pane: paneId, message: '' }, exec)
+    expect(writes).toEqual(['\r'])
+
+    await local.close()
+  }, 30_000)
+
+  it('returns what arrived since the send, and keeps the whole screen available', async () => {
+    // The viewport is mostly banner and composer. A model asking "what did the
+    // crew member say" should not have to find the answer in it again.
+    const { paneId } = await call('crew_seat', { agent: 'shell' })
+    await call('crew_send', { pane: paneId, message: 'echo answered-first' })
+    const second = await call('crew_send', { pane: paneId, message: 'echo answered-second' })
+    expect(second.kind).toBe('foreground')
+    expect(second.output).toContain('answered-second')
+    expect(second.output).not.toContain('answered-first')
+    expect(second.screen).toContain('answered-first')
+    await call('crew_dismiss', { pane: paneId })
+  }, 40_000)
 
   it('peeks at what the pane shows now, as the human sees it', async () => {
     const { paneId } = await call('crew_seat', { agent: 'shell' })
@@ -177,4 +225,79 @@ describe('the crew tools', () => {
   it('rejects a call missing a required argument before it runs', async () => {
     await expect(call('crew_send', { pane: 'pane-whatever' })).rejects.toThrow()
   })
+
+  it('says what is missing when the host has no job seam', async () => {
+    // The default fixture is a deployment without `ctx.jobs`, which is a real
+    // configuration — the split view and the four other tools work without it.
+    const { paneId } = await call('crew_seat', { agent: 'shell' })
+    await expect(call('crew_send', { pane: paneId, message: 'echo x', run_in_background: true }))
+      .rejects.toThrow(/load @deepseek-ai\/dsh-jobs/)
+    await call('crew_dismiss', { pane: paneId })
+  }, 30_000)
+})
+
+describe('a background send', () => {
+  /**
+   * Seat a shell in a fixture that has the job seam.
+   * @param {object} [options] - `config` overrides.
+   * @returns {Promise<object>} the fixture, the job double, and a bound sender.
+   */
+  async function seat(options = {}) {
+    const jobs = createJobsService()
+    const wire = bootWatchingTheWire({ jobs: jobs.service, ...options })
+    const exec = execFor(SESSION)
+    const { paneId } = await wire.local.tools.get('crew_seat').execute({ agent: 'shell' }, exec)
+    return {
+      ...wire,
+      jobs,
+      exec,
+      paneId,
+      send: args => wire.local.tools.get('crew_send').execute({ pane: paneId, ...args }, exec),
+    }
+  }
+
+  it('returns a job id instead of blocking, and reports the answer through it', async () => {
+    const { jobs, local, exec, send } = await seat()
+    const started = await send({ message: 'echo answered-in-background', run_in_background: true })
+    expect(started).toEqual({ kind: 'background', jobId: 'crew-1' })
+
+    const record = jobs.get(started.jobId)
+    // The whole point: the call came back before the crew member had finished.
+    expect(record.outcome).toBeUndefined()
+    expect(record.spec.label).toBe('Shell ← echo answered-in-background')
+    // The job registry fences access by the owning agent's session, so the live
+    // agent — not a copy of its id — has to be handed over.
+    expect(record.spec.owner).toBe(exec.agent)
+
+    const outcome = await record.hooks.done
+    expect(outcome.status).toBe('completed')
+    expect(outcome.output).toContain('answered-in-background')
+    await local.close()
+  }, 40_000)
+
+  it('cancels by interrupting the crew member, leaving the pane seated', async () => {
+    const { jobs, local, signals, send, paneId } = await seat()
+    const started = await send({ message: 'sleep 30', run_in_background: true })
+    const record = jobs.get(started.jobId)
+    // Let the submit land, so the interrupt reaches work that is really running.
+    await new Promise(resolve => { setTimeout(resolve, 700) })
+
+    record.hooks.cancel('changed my mind')
+    const outcome = await record.hooks.done
+    expect(outcome.status).toBe('killed')
+    expect(signals).toEqual(['SIGINT'])
+    // A cancelled delegation is not a reason to close a terminal the human is
+    // watching, so the pane is still there to send the next message to.
+    expect(await local.tools.get('crew_peek').execute({ pane: paneId }, execFor(SESSION))).toMatchObject({ status: 'running' })
+    await local.close()
+  }, 40_000)
+
+  it('can be turned off, parameter and all', async () => {
+    const { local, send } = await seat({ config: { enableRunInBackground: false } })
+    expect(local.tools.get('crew_send').parameters.properties.run_in_background).toBeUndefined()
+    // Undeclared arguments reach `execute` anyway, so the refusal is what holds.
+    await expect(send({ message: 'echo nope', run_in_background: true }))
+      .rejects.toThrow(/enableRunInBackground: false/)
+    await local.close()
+  }, 30_000)
 })

@@ -25,7 +25,7 @@ the observation are the same terminal.
   `signal`, `peek`, `close`) and a WebSocket upgrade at
   `/dsh-crew/attach?token=…`. Config: `agents`, `trustedHosts`, `cols`
   (100), `rows` (30), `scrollbackBytes` (262144), `maxPanesPerSession`
-  (6), `graceMs` (3000), `tools` (true).
+  (6), `graceMs` (3000), `tools` (true), `enableRunInBackground` (true).
 - **Web UI** (`dist/client.js`, built from `src/client/`). Discovered from
   package.json's `dsh.client` block, not from the bundle patch. Adds a
   **Crew** tab beside Chat and Trajectory: a seat bar plus one xterm.js
@@ -35,9 +35,12 @@ the observation are the same terminal.
 
 `crew_list` (roster + this session's panes), `crew_seat(agent)` (returns
 `paneId` and the first settled screen), `crew_send(pane, message,
-timeoutSeconds=180, max 900)` (types the text, presses Enter, waits for
-the screen to go quiet), `crew_peek(pane, lines?)`, `crew_dismiss(pane)`.
-A tool call may only touch panes belonging to its own session.
+timeoutSeconds, run_in_background?)` (types the text, presses Enter, waits
+for the screen to go quiet; the timeout defaults to 180 and caps at 900 in
+the foreground, 1800 and 7200 in the background), `crew_peek(pane, lines?)`,
+`crew_dismiss(pane)`. A tool call may only touch panes belonging to its own
+session. `crew_send` returns `{kind: 'foreground', output, screen, settled,
+status}` or `{kind: 'background', jobId}`.
 
 ## Built-in roster
 
@@ -65,6 +68,44 @@ rows override built-ins by `id` field-by-field, or append new ones.
 - **`crew_send` settles rather than returning immediately.** A CLI that has
   not begun rendering its reply is momentarily as quiet as one that
   finished, so the quiet window (3s) has to outlast that gap.
+- **Enter must be a separate write from the message.** Claude Code and
+  Codex both read one burst ending in a carriage return as a PASTE and keep
+  the return as a newline in the composer, so `message + '\r'` in a single
+  write types the task and submits nothing — and the pane then goes quiet,
+  so a settle-on-quiet rule reports the unsent question as the answer. The
+  fix is message, ~250ms pause, `'\r'` alone; verified against claude
+  2.1.232 and codex 0.147.0. The Web UI's broadcast line does the same.
+- **Seating waits for content, not just calm.** claude paints its first
+  frame after ~4.5s and codex after ~2s, and both are perfectly quiet until
+  then, so `crew_seat` requires a non-empty screen AND quiet (20s cap,
+  returning whatever it has on expiry).
+- **The first screen may be a dialog, and the plugin must not answer it.**
+  In an untrusted directory both products open on their own trust prompt.
+  The tool descriptions push that to the caller: answer it with `crew_send`
+  (empty message = Enter), then send the task. A task sent into a dialog is
+  typed into the dialog, and its digits can select an option — a "count from
+  1 to 12" prompt picked `2. No, quit` and ended the pane.
+- **No idle/prompt marker can shorten the wait for these two.** Both keep
+  their composer prompt (`›`, `❯`) on screen while they work, and codex goes
+  quiet for over 800ms mid-turn, so "prompt visible + short quiet" settles
+  early. Quiet is the floor and stays the floor.
+- **`run_in_background` is the harness job seam, not a thread.**
+  `ctx.jobs.start({kind: 'crew', label, owner: exec.agent, run})` — `run()`
+  is called once, synchronously, and returns `{cancel, done}`; `done` must
+  never reject, so a failure becomes `{status: 'failed', detail}`. No
+  `readOutput`: a repainting terminal has no useful incremental form, and
+  `crew_peek` is the live view. `cancel` sends SIGINT to the pane's
+  foreground and leaves the pane seated; whether the product treats that as
+  "stop this turn" is its own decision (several read Escape), and a `cancel`
+  that throws would force-fail the registry record, so it swallows both a
+  dead pane and a rejected signal. It needs both `ctx.jobs` and a job
+  controller (`@deepseek-ai/dsh-tool-jobs`) the calling agent can reach —
+  the registry refuses a start whose owner no controller serves.
+- **A send returns the delta, not the viewport.** `ScreenMirror.mark()` +
+  `since(mark, 200)` uses buffer indices, which survive scrolling: rows
+  below the marked viewport are new, and rows inside it count only if their
+  text changed. A CLI that repaints in place yields nothing usable, and the
+  viewport is the documented fallback.
 - **The control route requires `application/json`.** This is a security
   control, not a formality: a cross-site "simple" request cannot set it.
 - **The attach token is single-use, 30s TTL**, minted only by the
@@ -85,8 +126,11 @@ rows override built-ins by `id` field-by-field, or append new ones.
 
 `lib/index.js` (routes, config, dispatch), `lib/panes.js` (PTY registry,
 scrollback ring, attach tokens), `lib/roster.js` (crew data + PATH
-resolution), `lib/screen.js` (headless emulator mirror), `lib/tools.js`
-(the five tools + settle watcher), `lib/trust.js` (the request fence),
-`src/client/` (Web UI source), `scripts/build-client.mjs` (bundler,
-`--check` verifies freshness), `tests/host.spec.mjs` (15 tests against
-real PTYs and sockets).
+resolution), `lib/screen.js` (headless emulator mirror, `mark`/`since`),
+`lib/tools.js` (the five tools, settle watcher, background job producer),
+`lib/trust.js` (the request fence), `src/client/` (Web UI source),
+`scripts/build-client.mjs` (bundler, `--check` verifies freshness),
+`tests/host.spec.mjs` (15 tests against real PTYs and sockets),
+`tests/tools.spec.mjs` (18, including the wire shape and the job seam),
+`tests/real-cli.spec.mjs` (4, opt-in with `CREW_REAL_CLI=1`, seats the real
+claude and codex).
