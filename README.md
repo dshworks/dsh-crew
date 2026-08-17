@@ -19,6 +19,7 @@ its own CLI in the session's workspace, streamed to a pane in the Web UI.
 The agent in the center column seats them and hands them work; you see
 every keystroke of it, and you can type into any pane at any moment.
 
+[![site](https://img.shields.io/badge/site-dsh.works%2Fdsh--crew-00c2e9)](https://dsh.works/dsh-crew/)
 [![ci](https://github.com/dshworks/dsh-crew/actions/workflows/ci.yml/badge.svg)](https://github.com/dshworks/dsh-crew/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@dshworks/dsh-crew?color=4D6BFE)](https://www.npmjs.com/package/@dshworks/dsh-crew)
 [![powered by dsh](https://img.shields.io/badge/powered__by-dsh-4D6BFE?logo=deepseek)](https://github.com/deepseek-ai/deepseek-harness)

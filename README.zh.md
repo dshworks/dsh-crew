@@ -18,6 +18,7 @@ dsh 本来就能把活派给它们 —— `subagent-claude-code` 和 `subagent-c
 负责让它们入座、给它们派活；而这一切的每一次击键你都看得见，
 任何时候都可以直接在面板里打字。
 
+[![site](https://img.shields.io/badge/site-dsh.works%2Fdsh--crew-00c2e9)](https://dsh.works/dsh-crew/)
 [![ci](https://github.com/dshworks/dsh-crew/actions/workflows/ci.yml/badge.svg)](https://github.com/dshworks/dsh-crew/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@dshworks/dsh-crew?color=4D6BFE)](https://www.npmjs.com/package/@dshworks/dsh-crew)
 [![powered by dsh](https://img.shields.io/badge/powered__by-dsh-4D6BFE?logo=deepseek)](https://github.com/deepseek-ai/deepseek-harness)
