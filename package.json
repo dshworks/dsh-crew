@@ -1,0 +1,85 @@
+{
+  "name": "@dshworks/dsh-crew",
+  "description": "Run Claude Code and Codex as live terminal panes beside dsh: a split view in the web UI, buttons to seat them, and tools that let the dsh agent hand them work and read their screens.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./dist/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "src",
+    "dist",
+    "scripts",
+    "cordis.patch.yml",
+    "llms.txt",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dshworks/dsh-crew.git"
+  },
+  "homepage": "https://github.com/dshworks/dsh-crew#readme",
+  "bugs": {
+    "url": "https://github.com/dshworks/dsh-crew/issues"
+  },
+  "scripts": {
+    "build": "node scripts/build-client.mjs",
+    "test": "node scripts/build-client.mjs --check && vitest run"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "platform": "web"
+    }
+  },
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "claude-code",
+    "codex",
+    "terminal",
+    "pty",
+    "xterm",
+    "split-view",
+    "multi-agent",
+    "agent-team"
+  ],
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1",
+    "@xterm/headless": "^6.0.0",
+    "ws": "^8.21.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-subprocess": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+  },
+  "devDependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "esbuild": "^0.28.0",
+    "node-pty": "^1.1.0",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

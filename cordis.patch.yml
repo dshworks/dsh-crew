@@ -1,0 +1,13 @@
+# dsh-crew bundle patch: mount the crew as one composition row.
+#
+# `name` is the import specifier the Loader resolves, so it carries the full
+# package name; `id` is the composition row's handle and stays short — it is what
+# a profile's cordis.patch.yml targets to configure this plugin.
+#
+# The host half needs `subprocess` (the PTY seam) and `webServer` (the two
+# routes), both present in the stock web profile. `tools` is injected optionally:
+# without it the split view still works and the crew is human-driven only.
+# The Web UI half is discovered from package.json's `dsh.client` declaration.
+- insert:
+    - id: dsh-crew
+      name: '@dshworks/dsh-crew'

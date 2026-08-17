@@ -1,0 +1,92 @@
+# dsh-crew
+
+> A DeepSeek Harness (dsh) plugin that seats other coding agents as live
+> terminal panes beside dsh: each crew member is a real PTY running its own
+> CLI in the session's workspace, streamed to a split view in the Web UI.
+> The human watches and can take the keyboard; the dsh agent gets five
+> tools to seat crew, hand them work, and read their screens.
+
+npm: `@dshworks/dsh-crew` (scoped; the bundle patch's `name` must match it).
+Install: `dsh plugin --profile web add @dshworks/dsh-crew`.
+
+## What it is for
+
+The harness already ships `subagent-claude-code` and `subagent-codex`.
+Those are opaque by contract: one task in, one final sentence out, no
+progress stream, no human interaction path, and the model-facing terminal
+tool documents "no TUI". dsh-crew is the other half — the delegation and
+the observation are the same terminal.
+
+## The two halves
+
+- **Host** (`@dshworks/dsh-crew`, `lib/index.js`). Injects `subprocess`
+  and `webServer`; injects `tools` optionally. Mounts `POST
+  /dsh-crew/rpc` (ops: `roster`, `list`, `spawn`, `attach`, `input`,
+  `signal`, `peek`, `close`) and a WebSocket upgrade at
+  `/dsh-crew/attach?token=…`. Config: `agents`, `trustedHosts`, `cols`
+  (100), `rows` (30), `scrollbackBytes` (262144), `maxPanesPerSession`
+  (6), `graceMs` (3000), `tools` (true).
+- **Web UI** (`dist/client.js`, built from `src/client/`). Discovered from
+  package.json's `dsh.client` block, not from the bundle patch. Adds a
+  **Crew** tab beside Chat and Trajectory: a seat bar plus one xterm.js
+  pane per seated agent.
+
+## The five tools
+
+`crew_list` (roster + this session's panes), `crew_seat(agent)` (returns
+`paneId` and the first settled screen), `crew_send(pane, message,
+timeoutSeconds=180, max 900)` (types the text, presses Enter, waits for
+the screen to go quiet), `crew_peek(pane, lines?)`, `crew_dismiss(pane)`.
+A tool call may only touch panes belonging to its own session.
+
+## Built-in roster
+
+`claude` → `claude`, `codex` → `codex`, `dsh` → `dsh`, each spawned in its
+interactive form (no prompt argument). A roster entry is data: `agents`
+rows override built-ins by `id` field-by-field, or append new ones.
+`enabled: false` removes one. Availability is resolved against PATH
+*before* any spawn so a button can be disabled with the reason on it.
+
+## Facts that are easy to get wrong
+
+- **The workspace never comes from request data.** It is read from the
+  named dsh session's `header.cwd`. An unresolvable session is refused,
+  not defaulted to the server's cwd — defaulting would hand an agent write
+  access to wherever dsh was launched, on an unrecognized id alone.
+- **`TERM` must be overridden per pane.** The harness server usually runs
+  from a non-interactive shell, so ambient `TERM=dumb` is inherited by the
+  subprocess seam, and a coding CLI reading `dumb` disables colour and
+  cursor addressing. Panes declare `xterm-256color` + `truecolor`.
+- **The host runs a headless xterm mirror** (`lib/screen.js`) over the same
+  bytes the browser gets. `crew_peek` returns the rendered grid; the raw
+  byte stream is escape sequences and repaints, and stripping escapes
+  yields overlapping fragments, not a screen. Always `await drain()`
+  before `read()` — xterm's `write` is async by contract.
+- **`crew_send` settles rather than returning immediately.** A CLI that has
+  not begun rendering its reply is momentarily as quiet as one that
+  finished, so the quiet window (3s) has to outlast that gap.
+- **The control route requires `application/json`.** This is a security
+  control, not a formality: a cross-site "simple" request cannot set it.
+- **The attach token is single-use, 30s TTL**, minted only by the
+  fence-passing control route.
+- **A malformed `trustedHosts` entry throws at load**, because
+  `user@evil.example` would otherwise silently grant `evil.example`.
+- **`dist/client.js` is committed** and its module-loader `id` must equal
+  the package name — a different id registers a factory nobody resolves
+  and the client half silently never materializes, with no error.
+- **The bundler emits IIFE, not CJS.** esbuild's CJS output tags exports
+  with `__esModule`, which the Loader reads as an ES module and then looks
+  for a default export that is not there. `react` stays external — two
+  React copies in one document break hooks.
+- **Nothing writes the session log.** Raw terminal bytes are not
+  conversation state.
+
+## Files
+
+`lib/index.js` (routes, config, dispatch), `lib/panes.js` (PTY registry,
+scrollback ring, attach tokens), `lib/roster.js` (crew data + PATH
+resolution), `lib/screen.js` (headless emulator mirror), `lib/tools.js`
+(the five tools + settle watcher), `lib/trust.js` (the request fence),
+`src/client/` (Web UI source), `scripts/build-client.mjs` (bundler,
+`--check` verifies freshness), `tests/host.spec.mjs` (15 tests against
+real PTYs and sockets).

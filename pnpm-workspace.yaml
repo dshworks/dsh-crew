@@ -1,0 +1,6 @@
+# pnpm 11 moved build approval out of package.json into this file, under
+# `allowBuilds`. Both entries are devDependencies — esbuild builds the browser
+# bundle, node-pty backs the real-PTY tests. Consumers install neither.
+allowBuilds:
+  esbuild: true
+  node-pty: true

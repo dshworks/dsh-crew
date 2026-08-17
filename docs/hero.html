@@ -1,0 +1,222 @@
+<!doctype html>
+<!--
+  Source of docs/crew-dark.png and docs/crew-light.png.
+
+  This is a faithful reconstruction of the Crew tab, not a screenshot of one:
+  the chrome, spacing, accents, pane bars and broadcast line are taken from a
+  real `dsh --profile web` session with both agents seated, and the transcripts
+  are the shape each product actually prints. What is changed is the workspace
+  and the account — a shipped hero must not carry a maintainer's home directory,
+  email, or organisation.
+
+  Regenerate by serving this file and screenshotting #hero at 2x, once per
+  theme (add class="light" to <html> for the light variant).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>dsh-crew — hero</title>
+<style>
+  :root {
+    --bg: #05070c;
+    --surface: #0c0f16;
+    --pane: #0a0d13;
+    --line: #1b212e;
+    --line-soft: #151b26;
+    --dim: #55607450;
+    --caption: #5a6577;
+    --label: #8b98ab;
+    --text: #c3cdda;
+    --bright: #eef2f7;
+    --active: #6f8bff;
+    --claude: #d97757;
+    --codex: #10a37f;
+    --send: #4d6bfe;
+  }
+  html.light {
+    --bg: #eef1f6;
+    --surface: #ffffff;
+    --pane: #f7f9fc;
+    --line: #e3e8f0;
+    --line-soft: #edf1f6;
+    --caption: #98a3b5;
+    --label: #6b7789;
+    --text: #3c4757;
+    --bright: #131922;
+    --active: #2f4ce0;
+    --claude: #c2603f;
+    --codex: #0d8c6d;
+    --send: #2f4ce0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    font: 13px/1.5 -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    display: flex; align-items: center; justify-content: center; min-height: 100vh;
+  }
+  #hero { width: 1180px; padding: 28px; }
+  .app {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 30px 80px -24px rgba(0,0,0,.7);
+  }
+  html.light .app { box-shadow: 0 24px 56px -26px rgba(28,40,70,.3); }
+
+  .titlebar { display: flex; align-items: center; gap: 10px; padding: 14px 18px 0; }
+  .sessname { color: var(--bright); font-size: 13.5px; font-weight: 500; }
+  .mode { color: var(--caption); font-size: 12px; }
+
+  .tabs { display: flex; gap: 20px; padding: 10px 18px 0; border-bottom: 1px solid var(--line); }
+  .tab { padding-bottom: 9px; color: var(--label); font-size: 12.5px; }
+  .tab.on { color: var(--active); box-shadow: inset 0 -2px 0 var(--active); }
+
+  .seatbar { display: flex; align-items: center; gap: 8px; padding: 12px 16px; }
+  .seatlabel { font-size: 10px; letter-spacing: .09em; text-transform: uppercase; color: var(--caption); margin-right: 2px; }
+  .seat {
+    height: 26px; padding: 0 11px; border-radius: 13px;
+    border: 1px solid var(--line); color: var(--label); font-size: 12px;
+    display: inline-flex; align-items: center;
+  }
+  .seat.c { border-color: var(--claude); color: var(--claude); }
+  .seat.x { border-color: var(--codex); color: var(--codex); }
+  .spacer { flex: 1; }
+  .ghost { color: var(--caption); font-size: 12px; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 16px 12px; }
+  .pane {
+    background: var(--pane);
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--accent);
+    border-radius: 10px; overflow: hidden; min-width: 0;
+  }
+  .pane.claude { --accent: var(--claude); }
+  .pane.codex { --accent: var(--codex); }
+  .panebar {
+    display: flex; align-items: center; gap: 8px;
+    height: 28px; padding: 0 8px 0 10px; border-bottom: 1px solid var(--line-soft);
+  }
+  .dot { width: 6px; height: 6px; border-radius: 3px; background: var(--accent); }
+  .pname { font-size: 12px; color: var(--label); }
+  .pmeta { flex: 1; font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 10px; color: var(--caption); }
+  .pact { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--caption); padding: 0 4px; }
+
+  .term {
+    font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 11.5px; line-height: 1.4; color: var(--text);
+    padding: 10px 12px; height: 356px; white-space: pre-wrap; overflow: hidden;
+  }
+  .bx { color: var(--accent); }
+  .you { color: var(--bright); }
+  .mut { color: var(--caption); }
+  .ok { color: var(--codex); }
+  .warn { color: #d19a3a; }
+  .cur { background: var(--text); color: var(--pane); }
+
+  .cast { display: flex; gap: 8px; align-items: center; padding: 0 16px 16px; }
+  .castin {
+    flex: 1; height: 30px; border-radius: 15px; border: 1px solid var(--line);
+    display: flex; align-items: center; padding: 0 12px; color: var(--caption); font-size: 12px;
+  }
+  .castbtn { height: 30px; padding: 0 14px; border-radius: 15px; background: var(--send); color: #fff; font-size: 12px;
+    display: inline-flex; align-items: center; }
+</style>
+</head>
+<body>
+<div id="hero">
+  <div class="app">
+
+    <div class="titlebar">
+      <span class="sessname">rate limiter for the public API</span>
+      <span class="mode">◇ Standard mode</span>
+    </div>
+
+    <div class="tabs">
+      <span class="tab">Chat</span>
+      <span class="tab">Trajectory</span>
+      <span class="tab on">Crew</span>
+    </div>
+
+    <div class="seatbar">
+      <span class="seatlabel">seat</span>
+      <span class="seat c">+ Claude Code</span>
+      <span class="seat x">+ Codex</span>
+      <span class="seat">+ dsh</span>
+      <span class="spacer"></span>
+      <span class="ghost">refresh</span>
+    </div>
+
+    <div class="grid">
+
+      <div class="pane claude">
+        <div class="panebar">
+          <span class="dot"></span>
+          <span class="pname">Claude Code</span>
+          <span class="pmeta">pid 41207 · 90×34</span>
+          <span class="pact">^C</span>
+          <span class="pact">×</span>
+        </div>
+<div class="term"><span class="bx">╭──────────────────────────────────────────────────────╮</span>
+<span class="bx">│</span> <span class="you">✻ Claude Code</span> <span class="mut">v2.1.232</span>                               <span class="bx">│</span>
+<span class="bx">│</span>   <span class="mut">~/work/acme-api</span>                                    <span class="bx">│</span>
+<span class="bx">╰──────────────────────────────────────────────────────╯</span>
+
+<span class="you">&gt; where does this repo refresh auth tokens?</span>
+
+<span class="mut">⏺</span> Read <span class="you">src/auth/session.ts</span> <span class="mut">(214 lines)</span>
+<span class="mut">⏺</span> Grep <span class="you">"refresh"</span> <span class="mut">— 6 files</span>
+
+<span class="mut">⏺</span> One place: <span class="you">src/auth/session.ts:88</span>, in <span class="you">ensureFresh()</span>.
+  It refreshes inside 60s of expiry, and the request
+  interceptor already calls it — nothing else needs to.
+
+  The retry path at <span class="you">:141</span> does <span class="warn">not</span> go through it. A 401
+  there refreshes a second time, concurrently.
+
+<span class="you">&gt; </span><span class="cur"> </span></div>
+      </div>
+
+      <div class="pane codex">
+        <div class="panebar">
+          <span class="dot"></span>
+          <span class="pname">Codex</span>
+          <span class="pmeta">pid 41219 · 90×34</span>
+          <span class="pact">^C</span>
+          <span class="pact">×</span>
+        </div>
+<div class="term"><span class="bx">╭──────────────────────────────────────────────────────╮</span>
+<span class="bx">│</span> <span class="you">&gt;_ OpenAI Codex</span> <span class="mut">(v0.147.0)</span>                           <span class="bx">│</span>
+<span class="bx">│</span>                                                      <span class="bx">│</span>
+<span class="bx">│</span> <span class="mut">model:     gpt-5.6-sol    /model to change</span>           <span class="bx">│</span>
+<span class="bx">│</span> <span class="mut">directory: ~/work/acme-api</span>                           <span class="bx">│</span>
+<span class="bx">╰──────────────────────────────────────────────────────╯</span>
+
+<span class="you">› where does this repo refresh auth tokens?</span>
+
+<span class="mut">•</span> <span class="you">src/auth/session.ts</span> owns it. <span class="you">ensureFresh()</span> swaps the
+  token on a 60s skew, and the axios interceptor calls it
+  before every request.
+
+  Worth noting: <span class="you">refreshToken()</span> is unguarded, so two
+  requests racing an expiry both hit <span class="you">/oauth/token</span>. The
+  server rotates refresh tokens, so the loser gets a
+  <span class="warn">400 invalid_grant</span> and the session dies.
+
+<span class="mut">─ Streams: 23 events (4.1s) ───────────────────────────</span>
+
+<span class="you">› </span><span class="cur"> </span></div>
+      </div>
+
+    </div>
+
+    <div class="cast">
+      <span class="castin">Send to all 2 panes…</span>
+      <span class="castbtn">Send to all</span>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>
