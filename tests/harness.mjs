@@ -58,7 +58,25 @@ export function spawnTerminal(spec) {
       } catch {
         // Already reaped: terminate is idempotent by contract.
       }
-      await done
+      // Escalate exactly as `@deepseek-ai/dsh-subprocess-local` does. Without
+      // this the double is WEAKER than the seam it stands in for: node-pty's
+      // kill sends SIGHUP, an interactive shell is entitled to ignore it, and
+      // `terminate` would then await a `done` that never settles. That is a
+      // hang, not a failure — locally the shell happened to die and the suite
+      // stayed green; on a slower CI runner it did not, and the teardown test
+      // timed out with nothing to point at.
+      const escalation = setTimeout(() => {
+        try {
+          process.kill(child.pid, 'SIGKILL')
+        } catch {
+          // Exited between the timer firing and the signal: nothing to kill.
+        }
+      }, spec.graceMs ?? 3000)
+      try {
+        await done
+      } finally {
+        clearTimeout(escalation)
+      }
     },
   }
 }
