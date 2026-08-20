@@ -14,6 +14,15 @@ sentence. What they deliberately do not do is let you **watch**: no
 progress stream, no human interaction path, and the model-facing terminal
 tool documents "no TUI".
 
+0.1.0-rc.8 made those two installable on demand as Profile Bundles, gave
+Codex named instances, and added non-interactive permission modes — which
+sharpens the split rather than closing it. Read the rc.8 provider notes:
+every query still "never waits for a user interface", `AskUserQuestion` is
+still disabled, and outside bypass mode `canUseTool` now *denies* anything
+needing a human on the spot. Upstream is making unattended delegation
+better on purpose. This plugin is for the other half: when you want to see
+it happen and be able to answer.
+
 `dsh-crew` adds the missing half. Each crew member gets a real PTY running
 its own CLI in the session's workspace, streamed to a pane in the Web UI.
 The agent in the center column seats them and hands them work; you see
@@ -255,4 +264,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Not affiliated with DeepSeek. "DeepSeek Harness" is
+DeepSeek's trademark, used here only to say what this works with; the name follows
+the "DSH" form their [brand guidelines](https://github.com/deepseek-ai/deepseek-harness/blob/master/BRAND_GUIDELINES.md) recommend.

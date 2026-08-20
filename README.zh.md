@@ -13,6 +13,13 @@ dsh 本来就能把活派给它们 —— `subagent-claude-code` 和 `subagent-c
 是让你**看见过程**：没有进度流，没有人介入的通道，面向模型的终端工具
 文档里明写着 "no TUI"。
 
+0.1.0-rc.8 把这两个 subagent 改成了按需安装的 Profile Bundle，给 Codex 加了
+具名实例，还加了非交互的权限模式 —— 这不是把差距补上了，而是把分工画得更清楚。
+看 rc.8 的 provider 说明：每次 query 依然 "never waits for a user interface"，
+`AskUserQuestion` 依然是关的，而且除 bypass 模式外，`canUseTool` 现在会直接
+**拒绝**任何当场需要人确认的请求。上游是在有意把无人值守的委派做得更好。
+这个插件负责另一半：你想亲眼看着它跑，并且能随时回答它。
+
 `dsh-crew` 补上缺的那一半。每个成员都拿到一个真实 PTY，在本会话的工作区里
 跑它自己的 CLI，并把字节流送到 Web UI 的一个面板里。中间那一栏的 agent
 负责让它们入座、给它们派活；而这一切的每一次击键你都看得见，
