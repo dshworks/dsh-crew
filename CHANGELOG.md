@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.2.2 — 2026-09-17
+
+- **Installs beside dsh 0.1.5-rc.x.** dsh moved npm `latest` to 0.1.5-rc.2
+  on 2026-09-10, and npm never lets a prerelease satisfy a caret with a
+  different version tuple, so the 0.2.1 ranges matched no current harness.
+  Installed alone, npm kept the old `@deepseek-ai/dsh-*` copies at the root
+  and pushed the host's own into a nested `node_modules`: two harnesses,
+  no warning. The `dsh-subprocess` and `dsh-tools` peer ranges now OR in
+  `^0.1.5-rc.1`, and nothing further — peers resolve to the highest match,
+  so naming the 0.1.6 alpha line would split the tree again the other way.
+- **The harness packages are now explicit devDependencies**, mirroring the
+  peer ranges. As auto-installed peers they had sat in `pnpm-lock.yaml` at
+  0.1.0-rc.6 since the first release, so a local `pnpm install` tested
+  against a 0.1.0-rc harness. They lock at 0.1.5-rc.2 now.
+- No code change was needed: every seam the crew touches — the terminal
+  handle of `ctx.subprocess.spawnTerminal`, `webServer.register` /
+  `registerUpgrade`, `sessions.get()`, `defineTool`, `ctx.jobs`, and the
+  client's `conversation.view` slot — has the same shape in 0.1.5-rc.2.
+
+## 0.2.1 — 2026-09-04
+
+- **Installs beside dsh 0.1.2-rc.1.** Peer ranges OR in `^0.1.2-rc.1`; the
+  0.2.0 ranges matched no published dsh once 0.1.2-rc.1 became `latest`.
+- **A dsh release now turns this repo red.** `scripts/check-dsh-release.mjs`
+  installs this tree and the published package beside dsh `latest` and
+  asserts one version of every harness package; `dsh-release-watch.yml`
+  runs it daily and opens an issue on drift.
+
 ## 0.2.0 — 2026-08-17
 
 Background delegation, and the corrections that only the real products
