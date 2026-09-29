@@ -114,10 +114,11 @@ function lastLines(error, count = 8) {
  * @param {string} scratch - the run's scratch root.
  * @param {string} version - the dsh host version.
  * @param {string} spec - a tarball path or a registry spec.
+ * @param {string} expected - the plugin version that spec must install.
  * @param {string} label - what the report calls this check.
  * @returns {{ok: boolean, lines: string[]}} the verdict and its report lines.
  */
-function check(scratch, version, spec, label) {
+function check(scratch, version, spec, expected, label) {
   const { bin, supplies } = host(scratch, version)
   const home = mkdtempSync(join(scratch, 'home-'))
   const added = spawnSync(bin, ['plugin', '--profile', PROFILE, 'add', spec], {
@@ -136,6 +137,12 @@ function check(scratch, version, spec, label) {
     return { ok: false, lines: [`- FAIL  ${label} — dsh refused it:\n\n\`\`\`\n${refused.slice(0, 1).join('\n')}\n\`\`\`\n`] }
   }
   const profile = installedPackages(join(home, 'profiles', PROFILE))
+  // A registry tag can resolve from a stale metadata cache, so the check says
+  // what it actually installed and refuses to judge anything else.
+  const installed = profile.get(pkg.name)
+  if (installed !== expected) {
+    throw new CouldNotCheck(`asked for ${pkg.name}@${expected} on dsh ${version} but the profile holds ${installed ?? 'nothing'}`)
+  }
   profile.delete(pkg.name)
   const shadows = [...profile].filter(([name]) => supplies.has(name))
   if (shadows.length > 0) {
@@ -149,9 +156,9 @@ function check(scratch, version, spec, label) {
   return { ok: true, lines: [`- ok    ${label} — admitted; the profile gained the plugin and ${extra}`] }
 }
 
-/** Read a dsh dist-tag, or undefined when npm has none. */
-function distTag(tag) {
-  const value = run('npm', ['view', '@deepseek-ai/dsh', `dist-tags.${tag}`]).trim()
+/** Read a dist-tag from the registry itself (not the local cache), or undefined when there is none. */
+function distTag(tag, name = '@deepseek-ai/dsh') {
+  const value = run('npm', ['view', '--prefer-online', name, `dist-tags.${tag}`]).trim()
   return value === '' ? undefined : value
 }
 
@@ -183,10 +190,18 @@ try {
     throw new CouldNotCheck(`could not pack this tree: ${lastLines(error)}`)
   }
 
-  const required = [[tarball, `this tree on dsh ${latest}`]]
-  if (!TREE_ONLY) required.push([`${pkg.name}@latest`, `published ${pkg.name}@latest on dsh ${latest}`])
-  for (const [spec, label] of required) {
-    const result = check(scratch, latest, spec, label)
+  const required = [[tarball, pkg.version, `this tree (${pkg.version}) on dsh ${latest}`]]
+  if (!TREE_ONLY) {
+    let published
+    try {
+      published = distTag('latest', pkg.name)
+    } catch (error) {
+      throw new CouldNotCheck(`could not read ${pkg.name} dist-tags: ${error.message}`)
+    }
+    required.push([`${pkg.name}@${published}`, published, `published ${pkg.name}@${published} (\`latest\`) on dsh ${latest}`])
+  }
+  for (const [spec, expected, label] of required) {
+    const result = check(scratch, latest, spec, expected, label)
     failed = failed || !result.ok
     report.push(...result.lines)
   }
@@ -199,7 +214,7 @@ try {
       const next = distTag('next')
       if (next !== undefined && next !== latest) {
         report.push(`\nnpm also serves **${next}** on \`next\` (advisory, never fails this run):\n`)
-        report.push(...check(scratch, next, tarball, `this tree on dsh ${next}`).lines)
+        report.push(...check(scratch, next, tarball, pkg.version, `this tree (${pkg.version}) on dsh ${next}`).lines)
       }
     } catch (error) {
       report.push(`- advisory check could not run: ${error.message}`)
