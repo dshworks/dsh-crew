@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.2.3 — 2026-09-29
+
+- **Works on dsh 0.1.7 and 0.2.0.** The harness peers are now
+  `^0.1.7-alpha.1 || ^0.2.0-rc.1`. dsh 0.1.7 checks a plugin's
+  `@deepseek-ai/dsh*` peer ranges itself, at install and at profile start,
+  and refuses one that does not admit the running version; 0.1.7-alpha.1 is
+  the first dsh that has every seam contract below.
+- **Background delegation works again on dsh 0.1.7.** 0.2.2 was broken
+  there in two ways. The job registry now takes the owner as a session id,
+  so handing it the Agent object made every `crew_send(run_in_background:
+  true)` fail with `session "[object Object]" has no live agent`. And the
+  registry now reads a job's answer from `result` only, so the answer 0.2.2
+  returned as `output` would have reached `job_output` as nothing, with
+  status `completed`. Both follow the new contract.
+- **The pane declares its terminal through the seam.** `spawnTerminal`
+  requires `terminalType` since dsh 0.1.7 and writes it over `TERM`; the
+  `env TERM=… <agent>` wrapper that worked around the old hardcoded `dumb`
+  is gone. The SSH subprocess provider refuses a spawn without it.
+- **Installs one package, not six.** `ws`, `@xterm/headless`, and
+  `@deepseek-ai/schemastery` moved from `dependencies` to
+  `peerDependencies`. dsh ships all three, and `dsh plugin add` used to
+  hoist copies of them (plus `@deepseek-ai/cosmokit` and
+  `@standard-schema/spec`) into the profile, where they shadowed the host's
+  own for every plugin in it.
+- **The release check measures the real install path.**
+  `scripts/check-dsh-release.mjs` installs the published dsh, runs `dsh
+  plugin --profile web add` in a scratch `DSH_HOME`, and fails if dsh
+  refuses the plugin or the profile gains a host-supplied package. It used
+  to install dsh and the plugin into one npm tree, where npm resolves peers
+  itself; that reported split harness trees a real install never has, so
+  the 0.1.7 alert (#5) was a false positive, and the rule it taught, never
+  OR in the next dsh line, does not hold for a profile install. The check
+  now deletes its scratch directory on every exit path.
+- **The test doubles follow dsh 0.1.7.** The PTY double requires
+  `terminalType`; the job double resolves the owner against live session
+  ids, calls `run(job)`, and hands back only `result`. Each old call, put
+  back, turns the suite red.
+
 ## 0.2.2 — 2026-09-17
 
 - **Installs beside dsh 0.1.5-rc.x.** dsh moved npm `latest` to 0.1.5-rc.2

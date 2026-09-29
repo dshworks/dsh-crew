@@ -1,14 +1,14 @@
-# A new dsh release should turn this repo red, not quietly uninstall it.
+# A new dsh release should turn this repo red, not quietly drop the plugin.
 #
-# dsh ships prereleases only, and npm semver never lets a prerelease satisfy a
-# caret with a different version tuple. Every release therefore moves the whole
-# `@deepseek-ai/dsh-*` line outside any range we have already written, and
-# `npm i <this plugin>` beside current dsh fails with ERESOLVE. It happened on
-# 2026-08-21 and nobody noticed until 2026-09-04, because no test installs the
-# published plugin next to the published harness.
+# dsh checks every `@deepseek-ai/dsh*` peer range against its own version when
+# a plugin is installed and again when a profile starts, and refuses or disables
+# a plugin whose range does not admit it. So each dsh line needs a range that
+# names it, and the only proof that counts is the path users take:
+# `dsh plugin --profile web add` into a scratch DSH_HOME, on the published dsh.
+# `scripts/check-dsh-release.mjs` runs that, and also fails when the install
+# puts a copy of a package the host already ships into the profile.
 #
-# The check reads npm, so it fails loudly rather than silently: a red scheduled
-# run notifies nobody, and an issue does.
+# A red scheduled run notifies nobody, so drift opens (or comments on) an issue.
 name: dsh-release-watch
 
 on:
@@ -25,16 +25,17 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - run: npm install --no-audit --no-fund
+      # `dsh plugin` runs pnpm in the profile directory.
+      - run: npm install -g pnpm@11
 
       # `--tree-only` on a pull request: the published package is still the
-      # broken one on the very PR that fixes it, so gating a PR on it would
+      # old one on the very PR that fixes it, so gating a PR on it would
       # make this check red on its own fix. The scheduled run owns that half —
       # it is also the only run that can ever see it clear.
       - id: check
@@ -57,12 +58,14 @@ jobs:
             if [ "${{ steps.check.outputs.status }}" = "2" ]; then
               echo "The daily dsh release check could not finish."
             else
-              echo "A published dsh version no longer satisfies this plugin's peer ranges."
-              echo "Installing this plugin beside current dsh fails with \`ERESOLVE\`."
+              echo "\`dsh plugin --profile web add\` on current dsh no longer installs this plugin"
+              echo "cleanly: dsh refused its peer ranges, or the install put a copy of a package"
+              echo "the host already ships into the profile. The report below says which."
               echo
-              echo "Fix: OR the new line into every harness peer range in \`package.json\`,"
-              echo "re-run the install proof, then publish — a fix on main that never"
-              echo "reaches npm leaves every user broken."
+              echo "Fix: port and verify the plugin on the new dsh, then OR its line into the"
+              echo "\`@deepseek-ai/dsh*\` peer ranges (or move a host-supplied package from"
+              echo "\`dependencies\` to \`peerDependencies\`), and publish. A fix on main that"
+              echo "never reaches npm leaves every user on the old package."
             fi
             echo
             cat report.md

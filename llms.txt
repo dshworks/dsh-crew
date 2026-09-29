@@ -8,6 +8,11 @@
 
 npm: `@dshworks/dsh-crew` (scoped; the bundle patch's `name` must match it).
 Install: `dsh plugin --profile web add @dshworks/dsh-crew`.
+Works with dsh 0.1.7 and 0.2.0: the harness peers are
+`^0.1.7-alpha.1 || ^0.2.0-rc.1`, and dsh itself refuses a plugin whose
+`@deepseek-ai/dsh*` peer ranges do not admit the running version. `ws`,
+`@xterm/headless`, and `@deepseek-ai/schemastery` are peers too, because
+the host ships them.
 
 ## What it is for
 
@@ -56,10 +61,12 @@ rows override built-ins by `id` field-by-field, or append new ones.
   named dsh session's `header.cwd`. An unresolvable session is refused,
   not defaulted to the server's cwd — defaulting would hand an agent write
   access to wherever dsh was launched, on an unrecognized id alone.
-- **`TERM` must be overridden per pane.** The harness server usually runs
-  from a non-interactive shell, so ambient `TERM=dumb` is inherited by the
-  subprocess seam, and a coding CLI reading `dumb` disables colour and
-  cursor addressing. Panes declare `xterm-256color` + `truecolor`.
+- **`TERM` must be declared per pane.** The harness server usually runs
+  from a non-interactive shell with ambient `TERM=dumb`, and a coding CLI
+  reading `dumb` disables colour and cursor addressing. Panes pass
+  `terminalType: 'xterm-256color'` to `spawnTerminal` (required since dsh
+  0.1.7; the seam writes it over `TERM`, so `TERM` in `env` never reaches
+  the child) and `COLORTERM=truecolor` in `env`.
 - **The host runs a headless xterm mirror** (`lib/screen.js`) over the same
   bytes the browser gets. `crew_peek` returns the rendered grid; the raw
   byte stream is escape sequences and repaints, and stripping escapes
@@ -90,11 +97,14 @@ rows override built-ins by `id` field-by-field, or append new ones.
   quiet for over 800ms mid-turn, so "prompt visible + short quiet" settles
   early. Quiet is the floor and stays the floor.
 - **`run_in_background` is the harness job seam, not a thread.**
-  `ctx.jobs.start({kind: 'crew', label, owner: exec.agent, run})` — `run()`
-  is called once, synchronously, and returns `{cancel, done}`; `done` must
-  never reject, so a failure becomes `{status: 'failed', detail}`. No
-  `readOutput`: a repainting terminal has no useful incremental form, and
-  `crew_peek` is the live view. `cancel` sends SIGINT to the pane's
+  `ctx.jobs.start({kind: 'crew', label, owner: exec.agent.id, run})` — the
+  owner is the agent's session id (dsh 0.1.7; an Agent object is refused
+  with `session "[object Object]" has no live agent`). `run(job)` is called
+  once, synchronously, and returns `{cancel, done}`; `done` must never
+  reject, so a failure becomes `{status: 'failed', detail}`. The answer
+  travels in the outcome's `result`, the only field `job_output` hands the
+  model; nothing is appended to the output ring, because a repainting
+  terminal has no useful incremental form and `crew_peek` is the live view. `cancel` sends SIGINT to the pane's
   foreground and leaves the pane seated; whether the product treats that as
   "stop this turn" is its own decision (several read Escape), and a `cancel`
   that throws would force-fail the registry record, so it swallows both a
