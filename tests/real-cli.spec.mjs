@@ -58,13 +58,13 @@ afterAll(async () => {
 async function boot() {
   const cwd = await mkdtemp(`${tmpdir()}/dsh-crew-real-`)
   workspaces.push(cwd)
-  const jobs = createJobsService()
+  const jobs = createJobsService({ agents: [SESSION] })
   const local = createContext({
     sessions: { get: id => (id === SESSION ? { header: { cwd } } : undefined) },
     jobs: jobs.service,
   })
   apply(local.ctx, Config({}))
-  const exec = { agent: { session: { id: SESSION } }, signal: new AbortController().signal }
+  const exec = { agent: { id: SESSION, session: { id: SESSION } }, signal: new AbortController().signal }
   return {
     cwd,
     jobs,
@@ -132,9 +132,9 @@ describe.skipIf(!ENABLED)('against the real coding agents', () => {
         // The call returned while the crew member was still reading the message.
         expect(record.outcome).toBeUndefined()
 
-        const outcome = await record.hooks.done
-        expect(outcome.status).toBe('completed')
-        expect(outcome.output).toContain('BACKGROUND')
+        const read = await fixture.jobs.read(started.jobId)
+        expect(read.status).toBe('completed')
+        expect(read.result).toContain('BACKGROUND')
         await fixture.local.close()
       }, TURN_MS)
     })
