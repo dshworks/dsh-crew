@@ -237,12 +237,17 @@ matters. See [SECURITY.md](SECURITY.md).
   seam (`ctx.subprocess.spawnTerminal`), so this package inherits its
   credential scrub and process-tree teardown and ships no compiled addon.
   `node-pty` is a devDependency, used only to test against real PTYs.
+- **Nothing the host ships is installed twice.** `ws`, `@xterm/headless`,
+  and `@deepseek-ai/schemastery` are peerDependencies: dsh already ships
+  all three, and a copy installed into a profile would shadow the host's
+  for every plugin in it. `dsh plugin add` puts exactly one package in the
+  profile: this one.
 - **`TERM` is set by the pane, not inherited.** The harness server is
   normally started from a non-interactive shell, so its ambient `TERM` is
   `dumb` — and a coding CLI that reads that correctly concludes it is not
   on a terminal and turns off colour, which is precisely the output a pane
-  exists to show. Panes declare `xterm-256color` / `truecolor`, which is
-  what the browser end actually is.
+  exists to show. Panes declare `xterm-256color` (as the subprocess seam's
+  `terminalType`) and `truecolor`, which is what the browser end actually is.
 - **`dist/client.js` is committed.** Installing this package must not
   require a build step. `npm test` runs `build-client --check` first, so a
   stale bundle fails CI instead of shipping.

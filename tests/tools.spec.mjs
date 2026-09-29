@@ -24,12 +24,13 @@ let fixture
 let tools
 
 /**
- * The tool-execution identity a session's model call carries.
+ * The tool-execution identity a session's model call carries: the agent, whose
+ * `id` IS its session id, and the session it drives.
  * @param {string} sessionId - the calling session.
  * @returns {object} an `exec` argument.
  */
 function execFor(sessionId) {
-  return { agent: { session: { id: sessionId } }, signal: new AbortController().signal }
+  return { agent: { id: sessionId, session: { id: sessionId } }, signal: new AbortController().signal }
 }
 
 /**
@@ -243,7 +244,7 @@ describe('a background send', () => {
    * @returns {Promise<object>} the fixture, the job double, and a bound sender.
    */
   async function seat(options = {}) {
-    const jobs = createJobsService()
+    const jobs = createJobsService({ agents: [SESSION] })
     const wire = bootWatchingTheWire({ jobs: jobs.service, ...options })
     const exec = execFor(SESSION)
     const { paneId } = await wire.local.tools.get('crew_seat').execute({ agent: 'shell' }, exec)
@@ -257,7 +258,7 @@ describe('a background send', () => {
   }
 
   it('returns a job id instead of blocking, and reports the answer through it', async () => {
-    const { jobs, local, exec, send } = await seat()
+    const { jobs, local, send } = await seat()
     const started = await send({ message: 'echo answered-in-background', run_in_background: true })
     expect(started).toEqual({ kind: 'background', jobId: 'crew-1' })
 
@@ -265,13 +266,17 @@ describe('a background send', () => {
     // The whole point: the call came back before the crew member had finished.
     expect(record.outcome).toBeUndefined()
     expect(record.spec.label).toBe('Shell ← echo answered-in-background')
-    // The job registry fences access by the owning agent's session, so the live
-    // agent — not a copy of its id — has to be handed over.
-    expect(record.spec.owner).toBe(exec.agent)
+    // dsh 0.1.7 fences a job by its owner's SESSION ID and resolves the live
+    // agent itself. Handing over the Agent object, as 0.1.5 wanted, is refused
+    // at start with `session "[object Object]" has no live agent`.
+    expect(record.spec.owner).toBe(SESSION)
 
-    const outcome = await record.hooks.done
-    expect(outcome.status).toBe('completed')
-    expect(outcome.output).toContain('answered-in-background')
+    // Read it the way `job_output` does. The registry hands the model the
+    // outcome's `result` and nothing else, so an answer carried in any other
+    // field arrives as an empty read — silently, with status `completed`.
+    const read = await jobs.read(started.jobId)
+    expect(read.status).toBe('completed')
+    expect(read.result).toContain('answered-in-background')
     await local.close()
   }, 40_000)
 
@@ -283,8 +288,10 @@ describe('a background send', () => {
     await new Promise(resolve => { setTimeout(resolve, 700) })
 
     record.hooks.cancel('changed my mind')
-    const outcome = await record.hooks.done
-    expect(outcome.status).toBe('killed')
+    const read = await jobs.read(started.jobId)
+    expect(read.status).toBe('killed')
+    // What the pane showed up to the interrupt still reaches the model.
+    expect(read.result).toContain('sleep 30')
     expect(signals).toEqual(['SIGINT'])
     // A cancelled delegation is not a reason to close a terminal the human is
     // watching, so the pane is still there to send the next message to.

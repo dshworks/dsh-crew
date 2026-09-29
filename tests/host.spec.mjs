@@ -240,9 +240,10 @@ describe('a seated pane', () => {
   })
 
   it('tells the child it is on a colour terminal, whatever the server inherited', async () => {
-    // A harness started from a non-interactive shell carries TERM=dumb, and the
-    // subprocess seam passes it straight through; a coding CLI that reads it
-    // turns off exactly the output a pane exists to show.
+    // A harness started from a non-interactive shell carries TERM=dumb, and a
+    // coding CLI that reads it turns off exactly the output a pane exists to
+    // show. The seam writes the pane's declared `terminalType` over TERM, so
+    // this is what the pane declared, not what the server inherited.
     const spawned = await control(port, { op: 'spawn', sessionId: SESSION, agentId: 'shell' })
     const { pane, token } = spawned.body
     const socket = new WebSocket(`ws://127.0.0.1:${port}/dsh-crew/attach?token=${token}`)

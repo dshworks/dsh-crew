@@ -73,6 +73,40 @@ job is carrying terminal bytes.
 - Adding a crew member should be a **config row**, not code. If it needs
   code, the roster abstraction is wrong and that is the thing to fix.
 
+## When dsh releases
+
+dsh checks every `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` peer range
+against its own version, with prereleases included, when a plugin is
+installed and again when a profile starts. A range that does not admit the
+running dsh gets the plugin refused or disabled. So:
+
+- **Port first, then widen.** Read the upstream diff for every seam this
+  plugin touches, run the plugin on the new dsh, and only then OR the new
+  line into the peer ranges. A plugin installs into a profile with
+  `autoInstallPeers: false` and imports the host's own harness copies, so
+  an OR'd range never pulls a second harness in.
+- **Anything the host already ships is a peer, never a dependency.** A
+  profile is a hoisted pnpm project; a copy we install there shadows the
+  host's copy for every plugin in that profile. `ws`, `@xterm/headless`,
+  and `@deepseek-ai/schemastery` are peers (and devDependencies, for the
+  tests) for that reason.
+
+`scripts/check-dsh-release.mjs` proves both on the path users take: it
+installs the published dsh into a scratch prefix, runs `dsh plugin
+--profile web add` in a scratch `DSH_HOME`, and fails if dsh refuses the
+plugin or if the profile gains a package the host supplies.
+
+```sh
+node scripts/check-dsh-release.mjs --tree-only   # this tree on dsh `latest`
+node scripts/check-dsh-release.mjs               # + the published package; `next` as advisory
+DSH_VERSION=0.2.0-rc.1 node scripts/check-dsh-release.mjs --tree-only
+```
+
+It needs `pnpm` on PATH, downloads a full dsh per host version, and
+deletes its scratch directory on exit (`--keep` leaves it for debugging).
+`dsh-release-watch.yml` runs it daily and on pull requests that touch
+`package.json`.
+
 ## Translations
 
 `README.md` and `README.zh.md` are peers — a change to one that affects

@@ -1,165 +1,219 @@
-// Does this plugin still get the SAME harness the host is running?
+// Does this plugin still install into a current dsh the way users install it?
 //
-// Not "does `npm i` succeed" — that is the weaker question, and it passes while
-// broken. dsh ships prereleases only, and npm semver never lets a prerelease
-// satisfy a caret with a different version tuple: `^0.1.0-rc.6` matches
-// 0.1.0-rc.8 and nothing after it. So a stale peer range fails two ways.
+// What it measures: the supported install path, for real. Install a published
+// dsh into a scratch prefix, point DSH_HOME at a scratch directory, and run
+// `dsh plugin --profile web add <this plugin>`. Then assert two things.
 //
-// Loudly, when two plugins disagree: `npm i` stops with ERESOLVE.
+// 1. dsh admits it. Since 0.1.7 dsh checks every `@deepseek-ai/dsh` and
+//    `@deepseek-ai/dsh-*` peer range against the running version itself
+//    (`semver.satisfies(runtime, range, { includePrerelease: true })`), before
+//    and after pnpm runs, and rolls the profile back on a mismatch; the same
+//    gate disables the plugin at profile startup. A non-zero exit here is the
+//    gate refusing us, or the install failing outright.
+// 2. Nothing the host already supplies lands in the profile. The profile is a
+//    pnpm project with `nodeLinker: hoisted` and `autoInstallPeers: false`, and
+//    dsh routes any import the profile does not physically hold to the host's
+//    own copy. A package in our `dependencies` that the host also ships is
+//    therefore hoisted into the profile and shadows the host's copy for every
+//    plugin in that profile. Host-supplied packages belong in
+//    peerDependencies.
 //
-// Quietly, and this is the one that matters, when a plugin is installed alone:
-// npm is happy to satisfy `^0.1.0-rc.6` by HOISTING `@deepseek-ai/dsh-llm`
-// 0.1.0-rc.8 to the root and pushing dsh's own 0.1.2-rc.1 copy down into a
-// nested `node_modules`. 691 packages instead of 528, zero warnings, and the
-// plugin now imports a four-release-old harness while the host imports the
-// current one. Instances do not match, types do not match, and nothing throws.
+// Why it no longer builds one npm tree: the previous version installed dsh and
+// this plugin together into a fresh npm project and counted `@deepseek-ai/dsh-*`
+// copies. That is not how anyone installs a dsh plugin. npm auto-installs peers
+// and resolves them to the highest match, so it reported split harness trees
+// that the real path never produces, raised a false release alarm, and taught
+// the wrong rule ("never OR the next dsh line into a peer range").
 //
-// So the assertion is single-version resolution, checked on a real install.
-// Twice, because they fail separately: this tree (did we fix it?) and the
-// PUBLISHED package (did the fix ship? — this org has published off an
-// unmerged branch before, and a fix users cannot install is not a fix).
+// Two checks, because they fail separately: this tree (did we fix it?) and the
+// PUBLISHED package (did the fix ship?). `--tree-only` checks this tree only,
+// for pull requests, where the published package is by definition still the
+// old one. Against dsh `latest` both must pass. Against `next`, when npm serves
+// one ahead of `latest`, this tree is checked as an advisory: reported, never
+// failing, because a red check nobody can clear yet gets switched off.
+//
+// `DSH_VERSION=<version>` replaces `latest` as the required host.
+// `--keep` leaves the scratch directory in place and prints its path.
+//
+// Needs node, npm, and pnpm on PATH (`dsh plugin` runs pnpm). Each host install
+// is several hundred MB; the scratch directory is removed on every exit path.
 //
 // Exit 0 clean, 1 drift, 2 could not check.
 
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, readdirSync, existsSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-// `--tree-only`: check what this branch would publish, and nothing else.
-const PR_ONLY = process.argv.includes('--tree-only')
+const TREE_ONLY = process.argv.includes('--tree-only')
+const KEEP = process.argv.includes('--keep')
 const ROOT = new URL('..', import.meta.url).pathname
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'))
-const report = []
-let failed = false
+const PROFILE = 'web'
 
-const run = (cmd, args, cwd) =>
-  execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+/** A failure that means "could not check", not "the plugin drifted". */
+class CouldNotCheck extends Error {}
 
-/** Every `@deepseek-ai/dsh*` copy under a tree, as name -> set of versions. */
-function harnessVersions(dir) {
-  const seen = new Map()
+const run = (cmd, args, options = {}) =>
+  execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, ...options })
+
+/**
+ * Every package name installed under a node_modules tree, nested ones included.
+ * @param {string} dir - a directory holding `node_modules`.
+ * @returns {Map<string, string>} package name to version.
+ */
+function installedPackages(dir) {
+  const found = new Map()
   const walk = (nm) => {
     if (!existsSync(nm)) return
     for (const entry of readdirSync(nm, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      if (entry.name === '@deepseek-ai') {
-        const scope = join(nm, entry.name)
-        for (const p of readdirSync(scope)) {
-          if (!p.startsWith('dsh')) continue
-          const manifest = join(scope, p, 'package.json')
-          if (!existsSync(manifest)) continue
-          const { version } = JSON.parse(readFileSync(manifest, 'utf8'))
-          if (!seen.has(p)) seen.set(p, new Set())
-          seen.get(p).add(version)
-          walk(join(scope, p, 'node_modules'))
-        }
-        continue
+      if (!entry.isDirectory() || entry.name.startsWith('.')) continue
+      const names = entry.name.startsWith('@')
+        ? readdirSync(join(nm, entry.name)).map(child => `${entry.name}/${child}`)
+        : [entry.name]
+      for (const name of names) {
+        const manifest = join(nm, name, 'package.json')
+        if (!existsSync(manifest)) continue
+        if (!found.has(name)) found.set(name, JSON.parse(readFileSync(manifest, 'utf8')).version)
+        walk(join(nm, name, 'node_modules'))
       }
-      walk(join(nm, entry.name, 'node_modules'))
     }
   }
   walk(join(dir, 'node_modules'))
-  return seen
+  return found
 }
 
 /**
- * Install `specs` together and assert one version of every harness package.
- *
- * `advisory` reports without failing: the ahead-of-the-tag look below is a
- * forecast, and a repo cannot act on it today (see the note there), so turning
- * it red would only teach people to ignore a red check.
+ * Install one published dsh into its own prefix, once per version.
+ * @param {string} scratch - the run's scratch root.
+ * @param {string} version - an exact dsh version.
+ * @returns {{bin: string, supplies: Map<string, string>}} its CLI and every package it ships.
  */
-function check(specs, label, advisory = false) {
-  const dir = mkdtempSync(join(tmpdir(), 'dsh-release-'))
+const hosts = new Map()
+function host(scratch, version) {
+  if (hosts.has(version)) return hosts.get(version)
+  const prefix = join(scratch, `host-${version}`)
   try {
-    run('npm', ['init', '-y'], dir)
-    run('npm', ['install', '--no-audit', '--no-fund', '--ignore-scripts', ...specs], dir)
+    run('npm', ['install', '--prefix', prefix, '--no-audit', '--no-fund', `@deepseek-ai/dsh@${version}`])
   } catch (error) {
-    failed = failed || !advisory
-    const out = `${error.stdout ?? ''}${error.stderr ?? ''}`
-    const why = out.split('\n').filter((l) => /npm error/.test(l)).slice(0, 8).join('\n')
-    report.push(`- FAIL  ${label} — install refused\n\n\`\`\`\n${why}\n\`\`\`\n`)
-    return
+    throw new CouldNotCheck(`could not install dsh ${version}: ${lastLines(error)}`)
   }
-  const split = [...harnessVersions(dir)].filter(([, versions]) => versions.size > 1)
-  if (split.length === 0) {
-    report.push(`- ok    ${label} — one version of every harness package`)
-    return
+  const installed = { bin: join(prefix, 'node_modules', '.bin', 'dsh'), supplies: installedPackages(prefix) }
+  hosts.set(version, installed)
+  return installed
+}
+
+/** The tail of a failed command's output, for the report. */
+function lastLines(error, count = 8) {
+  const out = `${error.stdout ?? ''}${error.stderr ?? ''}`.trim()
+  return out.split('\n').slice(-count).join('\n') || error.message
+}
+
+/**
+ * Run `dsh plugin --profile web add <spec>` in a fresh DSH_HOME and judge it.
+ * @param {string} scratch - the run's scratch root.
+ * @param {string} version - the dsh host version.
+ * @param {string} spec - a tarball path or a registry spec.
+ * @param {string} label - what the report calls this check.
+ * @returns {{ok: boolean, lines: string[]}} the verdict and its report lines.
+ */
+function check(scratch, version, spec, label) {
+  const { bin, supplies } = host(scratch, version)
+  const home = mkdtempSync(join(scratch, 'home-'))
+  const added = spawnSync(bin, ['plugin', '--profile', PROFILE, 'add', spec], {
+    cwd: scratch,
+    env: { ...process.env, DSH_HOME: home },
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  })
+  const output = `${added.stdout ?? ''}${added.stderr ?? ''}`
+  if (added.error !== undefined) throw new CouldNotCheck(`could not run dsh ${version}: ${added.error.message}`)
+  if (added.status !== 0) {
+    const refused = output.split('\n').filter(line => /incompatible with dsh|installation rejected/.test(line))
+    if (refused.length === 0) {
+      throw new CouldNotCheck(`\`dsh plugin add\` failed on dsh ${version} for a reason other than the gate:\n${output.trim().split('\n').slice(-8).join('\n')}`)
+    }
+    return { ok: false, lines: [`- FAIL  ${label} — dsh refused it:\n\n\`\`\`\n${refused.slice(0, 1).join('\n')}\n\`\`\`\n`] }
   }
-  failed = failed || !advisory
-  const lines = split.map(([name, versions]) => `    @deepseek-ai/${name}: ${[...versions].sort().join(', ')}`)
-  report.push(
-    `- FAIL  ${label} — the plugin and the host resolve different copies:\n\n\`\`\`\n${lines.join('\n')}\n\`\`\`\n`,
-  )
+  const profile = installedPackages(join(home, 'profiles', PROFILE))
+  profile.delete(pkg.name)
+  const shadows = [...profile].filter(([name]) => supplies.has(name))
+  if (shadows.length > 0) {
+    const rows = shadows.map(([name, v]) => `    ${name}@${v} (host ships ${supplies.get(name)})`)
+    return {
+      ok: false,
+      lines: [`- FAIL  ${label} — the profile now holds copies of packages the host supplies, shadowing them for every plugin in it:\n\n\`\`\`\n${rows.join('\n')}\n\`\`\`\n`],
+    }
+  }
+  const extra = profile.size === 0 ? 'nothing else' : `${profile.size} other package(s), none host-supplied`
+  return { ok: true, lines: [`- ok    ${label} — admitted; the profile gained the plugin and ${extra}`] }
 }
 
-// DSH_VERSION proves the tree against a version that is published but not
-// tagged. npm ships new tuples on `alpha` for days before `latest` moves, and
-// the day it moves every range written against the old tuple stops resolving
-// at once — so the only way to widen a range BEFORE the outage is to install
-// against the version that is coming. Unset, this checks what users get.
-let latest
+/** Read a dsh dist-tag, or undefined when npm has none. */
+function distTag(tag) {
+  const value = run('npm', ['view', '@deepseek-ai/dsh', `dist-tags.${tag}`]).trim()
+  return value === '' ? undefined : value
+}
+
+const report = []
+let failed = false
+let unable = false
+const scratch = mkdtempSync(join(tmpdir(), 'dsh-release-'))
 try {
-  latest = process.env.DSH_VERSION?.trim()
-    || run('npm', ['view', '@deepseek-ai/dsh', 'dist-tags.latest'], ROOT).trim()
-  const how = process.env.DSH_VERSION ? 'DSH_VERSION' : '`latest` on npm'
-  report.push(`dsh ${how}: **${latest}**\n`)
-} catch (error) {
-  console.error(`could not read dsh dist-tags: ${error.message}`)
-  process.exit(2)
-}
-
-// Into a temp dir, not the repo root. `npm pack` leaves the tarball where you
-// point it, and a stray .tgz beside package.json is one `git add -A` away from
-// being committed — which is how these sweeps stage everything.
-let tarball
-const packDir = mkdtempSync(join(tmpdir(), 'dsh-release-pack-'))
-try {
-  tarball = join(packDir, run('npm', ['pack', '--silent', '--ignore-scripts', '--pack-destination', packDir], ROOT).trim().split('\n').pop())
-} catch (error) {
-  console.error(`could not pack this tree: ${error.message}`)
-  console.log(report.join('\n'))
-  process.exit(2)
-}
-
-check([`@deepseek-ai/dsh@${latest}`, tarball], `this tree beside dsh ${latest}`)
-const treeFailed = failed
-
-// On a pull request only THIS TREE can be green: the published package is by
-// definition still the broken one on the very PR that fixes it, and a check
-// that is red on its own fix is a check people switch off. The published half
-// belongs to the scheduled run, which is also the only place it can clear.
-if (!PR_ONLY) {
-  check([`@deepseek-ai/dsh@${latest}`, `${pkg.name}@latest`], `published ${pkg.name} beside dsh ${latest}`)
-}
-
-// Ahead of the tag.
-//
-// npm serves new tuples on `alpha` for days before `latest` moves, and the day
-// it moves every range written against the old tuple stops resolving at once.
-// This asks that question early so the bump is scheduled rather than
-// discovered -- but only reports, because the answer cannot be acted on yet:
-// these are peerDependencies, npm installs the HIGHEST satisfying version, and
-// simply OR-ing the coming line in makes the plugin pull 0.1.5 beside a 0.1.2
-// host. Measured, not assumed: widening the range turned this very check red
-// against `latest`. The range has to move WITH the tag, so what this buys is
-// the warning, not the fix.
-if (!PR_ONLY) {
-  let ahead
   try {
-    ahead = JSON.parse(run('npm', ['view', '@deepseek-ai/dsh', 'versions', '--json'], ROOT)).at(-1)
-  } catch { ahead = null }
-  if (ahead && ahead !== latest) {
-    report.push(`\nnpm is also serving **${ahead}**, ahead of the tag:\n`)
-    check([`@deepseek-ai/dsh@${ahead}`, tarball], `this tree beside dsh ${ahead} (advisory)`, true)
-    report.push(
-      `\nAdvisory only. Do not widen the range to fix it -- these are peerDependencies and npm`
-      + ` installs the highest satisfying version, so adding ${ahead}'s line makes this plugin pull`
-      + ` it beside a ${latest} host. Bump when the tag moves.\n`,
-    )
+    run('pnpm', ['--version'])
+  } catch {
+    throw new CouldNotCheck('pnpm is not on PATH; `dsh plugin` needs it')
   }
+
+  let latest
+  try {
+    latest = process.env.DSH_VERSION?.trim() || distTag('latest')
+  } catch (error) {
+    throw new CouldNotCheck(`could not read dsh dist-tags: ${error.message}`)
+  }
+  report.push(`dsh ${process.env.DSH_VERSION ? 'DSH_VERSION' : '`latest` on npm'}: **${latest}**\n`)
+
+  let tarball
+  try {
+    const packDir = join(scratch, 'pack')
+    mkdirSync(packDir)
+    tarball = join(packDir, run('npm', ['pack', '--silent', '--ignore-scripts', '--pack-destination', packDir], { cwd: ROOT }).trim().split('\n').pop())
+  } catch (error) {
+    throw new CouldNotCheck(`could not pack this tree: ${lastLines(error)}`)
+  }
+
+  const required = [[tarball, `this tree on dsh ${latest}`]]
+  if (!TREE_ONLY) required.push([`${pkg.name}@latest`, `published ${pkg.name}@latest on dsh ${latest}`])
+  for (const [spec, label] of required) {
+    const result = check(scratch, latest, spec, label)
+    failed = failed || !result.ok
+    report.push(...result.lines)
+  }
+
+  // Ahead of the tag: advisory. It says whether the next line would admit this
+  // tree before `latest` moves, so the range can be widened on evidence — and
+  // widening is safe here, because a profile install never pulls a peer.
+  if (!TREE_ONLY) {
+    try {
+      const next = distTag('next')
+      if (next !== undefined && next !== latest) {
+        report.push(`\nnpm also serves **${next}** on \`next\` (advisory, never fails this run):\n`)
+        report.push(...check(scratch, next, tarball, `this tree on dsh ${next}`).lines)
+      }
+    } catch (error) {
+      report.push(`- advisory check could not run: ${error.message}`)
+    }
+  }
+} catch (error) {
+  // A bug in this script is not evidence about the plugin: report it as
+  // "could not check" rather than letting it read as drift.
+  unable = true
+  report.push(`- could not check: ${error instanceof CouldNotCheck ? error.message : error.stack}`)
+} finally {
+  if (KEEP) console.error(`kept scratch directory: ${scratch}`)
+  else rmSync(scratch, { recursive: true, force: true })
 }
 
 console.log(report.join('\n'))
-process.exit((PR_ONLY ? treeFailed : failed) ? 1 : 0)
+process.exitCode = unable ? 2 : failed ? 1 : 0

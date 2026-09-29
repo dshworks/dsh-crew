@@ -211,11 +211,15 @@ job 归调用的那个 agent 所有，所以 `job_list`、`job_output` 沿用 ha
 - **不带原生依赖。** PTY 来自 harness 的 subprocess 接缝
   （`ctx.subprocess.spawnTerminal`），因此本包继承了它的凭据擦除和进程树拆除，
   自己不带任何编译扩展。`node-pty` 只是 devDependency，用来对着真 PTY 跑测试。
+- **宿主已有的包不再装第二份。** `ws`、`@xterm/headless` 和
+  `@deepseek-ai/schemastery` 是 peerDependencies：dsh 本身就带着这三个包，
+  装进 profile 的副本会遮住宿主的那一份，影响这个 profile 里的所有插件。
+  `dsh plugin add` 只往 profile 里放一个包：本插件自己。
 - **`TERM` 由面板自己声明，不继承。** harness 服务通常从非交互 shell 启动，
   于是环境里的 `TERM` 是 `dumb`；而编程 CLI 读到 `dumb`
   会正确地判断自己不在终端上，从而关掉颜色和光标定位 ——
-  那恰恰是面板存在的意义所在。面板声明 `xterm-256color` / `truecolor`，
-  这也确实就是浏览器那一端的真实情况。
+  那恰恰是面板存在的意义所在。面板声明 `xterm-256color`（作为 subprocess
+  接缝的 `terminalType`）和 `truecolor`，这也确实就是浏览器那一端的真实情况。
 - **`dist/client.js` 是提交进仓库的。** 安装这个包不该需要构建步骤。
   `npm test` 会先跑 `build-client --check`，
   所以过期的 bundle 会在 CI 上失败，而不是发到 npm 上去。

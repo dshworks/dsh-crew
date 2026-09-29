@@ -16,23 +16,30 @@ import pty from 'node-pty'
 /**
  * A `SubprocessTerminalHandle` over node-pty — the same implementation shape
  * `@deepseek-ai/dsh-subprocess-local` provides in production.
- * @param {object} spec - argv, cwd, env, cols, rows.
+ * @param {object} spec - argv, cwd, env, cols, rows, terminalType.
  * @returns {object} the terminal handle.
  */
 export function spawnTerminal(spec) {
+  // Required since dsh 0.1.7. The local provider would quietly fall back to
+  // node-pty's `xterm`, but `@deepseek-ai/dsh-subprocess-ssh` validates it as
+  // a non-empty string and refuses the spawn, so a pane that forgets it works
+  // on one shipped provider and not the other. The double refuses, like the
+  // stricter of the two.
+  if (typeof spec.terminalType !== 'string' || spec.terminalType === '') {
+    throw new Error('spawnTerminal: terminalType is required (a non-empty string)')
+  }
   const [command, ...args] = spec.argv
   const child = pty.spawn(command, args, {
-    // `dumb`, exactly as `@deepseek-ai/dsh-subprocess-local` hardcodes it, and
-    // NOT the value the pane would like. node-pty resolves `opt.name ||
-    // env.TERM` and then assigns `env.TERM = name`, so the provider's constant
-    // wins over anything a caller puts in `spec.env`. A double that passed
-    // `xterm-256color` here would honour a `TERM` the real seam silently
-    // discards — which is exactly how a broken pane once shipped a green suite.
-    name: 'dumb',
+    // `spec.terminalType`, exactly as `@deepseek-ai/dsh-subprocess-local`
+    // passes it: as node-pty's `name`, AND written over `TERM` after the
+    // caller's env is merged. `TERM` in `spec.env` therefore never reaches the
+    // child — the terminal type is the one variable the seam sets itself, and a
+    // double that honoured `spec.env.TERM` would let a pane skip declaring it.
+    name: spec.terminalType,
     cols: spec.cols,
     rows: spec.rows,
     cwd: spec.cwd,
-    env: { ...process.env, ...spec.env },
+    env: { ...process.env, ...spec.env, TERM: spec.terminalType },
   })
   const output = new PassThrough({ encoding: 'utf8' })
   child.onData(data => { output.write(data) })
@@ -82,34 +89,58 @@ export function spawnTerminal(spec) {
 }
 
 /**
- * A stand-in for the harness's background-job registry (`ctx.jobs`).
+ * A stand-in for the harness's background-job registry (`ctx.jobs`), shaped
+ * after `@deepseek-ai/dsh-jobs-local` 0.1.7.
  *
- * It implements the producer side of the published `JobStart` contract, which is
- * the half this plugin has to get right: `run()` is called once, synchronously,
- * and must hand back `cancel` and `done` before `start` returns an id. What it
- * deliberately does NOT emulate is the runtime's own half — the session fence,
- * the controller requirement, completion notices — because a double cannot
- * prove those and pretending to would only hide where they actually live.
+ * It implements the producer side of the published `JobSpec` contract, which is
+ * the half this plugin has to get right:
+ *
+ * - `owner` is the owning agent's SESSION ID, resolved against the live agents.
+ *   Anything else — the `Agent` object the 0.1.5 contract wanted — is refused
+ *   exactly as the registry refuses it: `session "…" has no live agent`.
+ * - `run(job)` is called once, synchronously, with the producer face
+ *   (`id`, `append`, `updateProgress`), and must hand back `cancel` and `done`.
+ * - The outcome's value travels in `result`. The registry reads nothing else,
+ *   so `read()` here returns `result` and silently drops any other field, which
+ *   is precisely what the real one does to a producer still writing `output`.
+ *
+ * What it deliberately does NOT emulate is the runtime's own half — the
+ * controller requirement, the output ring's pump, completion notices — because
+ * a double cannot prove those and pretending to would only hide where they
+ * actually live.
+ * @param {object} [options] - `agents`: session ids that have a live agent.
  * @returns {object} the service plus the records a test inspects.
  */
-export function createJobsService() {
+export function createJobsService(options = {}) {
+  const live = new Set(options.agents ?? [])
   const records = []
+  const counters = new Map()
   return {
     service: {
       /**
-       * @param {object} spec - the `JobStart` a producer supplies.
+       * @param {object} spec - the `JobSpec` a producer supplies.
        * @returns {string} the issued job id.
        */
       start(spec) {
+        if (spec.owner !== undefined && !live.has(spec.owner)) {
+          throw new Error(`session "${String(spec.owner)}" has no live agent (background job owner must be live)`)
+        }
         for (const key of ['kind', 'label']) {
           if (typeof spec[key] !== 'string' || spec[key] === '') throw new Error(`a job needs a ${key}`)
         }
         if (typeof spec.run !== 'function') throw new Error('a job needs a starter')
-        const hooks = spec.run()
+        const count = (counters.get(spec.kind) ?? 0) + 1
+        counters.set(spec.kind, count)
+        const record = { id: `${spec.kind}-${count}`, spec, hooks: undefined, outcome: undefined, chunks: [], progress: undefined }
+        const hooks = spec.run({
+          id: record.id,
+          append: (text) => { if (text !== '') record.chunks.push(text) },
+          updateProgress: (line) => { record.progress = line },
+        })
         if (typeof hooks?.cancel !== 'function' || typeof hooks?.done?.then !== 'function') {
           throw new Error('a job starter must return cancel and done')
         }
-        const record = { id: `${spec.kind}-${records.length + 1}`, spec, hooks, outcome: undefined }
+        record.hooks = hooks
         // The registry records the outcome and never lets `done` reject.
         void hooks.done.then((outcome) => { record.outcome = outcome })
         records.push(record)
@@ -123,6 +154,17 @@ export function createJobsService() {
      */
     get(id) {
       return records.find(record => record.id === id)
+    },
+    /**
+     * What the model's `job_output` receives once the job settles: the ring's
+     * chunks and the outcome's `result`, and nothing else from the outcome.
+     * @param {string} id - an issued job id.
+     * @returns {Promise<{text: string, result: string | undefined, status: string}>} the settled read.
+     */
+    async read(id) {
+      const record = records.find(entry => entry.id === id)
+      const outcome = await record.hooks.done
+      return { text: record.chunks.join(''), result: outcome.result, status: outcome.status }
     },
   }
 }
