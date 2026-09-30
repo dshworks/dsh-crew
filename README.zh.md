@@ -34,7 +34,7 @@ dsh 本来就能把活派给它们 —— `subagent-claude-code` 和 `subagent-c
 </td>
 <td width="60%" valign="top">
 
-<img src="https://raw.githubusercontent.com/dshworks/dsh-crew/main/docs/crew-dark.png" alt="dsh Web UI 中 Chat 和 Trajectory 旁边打开的团队标签页：入座栏里列着 Claude Code、Codex 和 dsh，一个面板里跑着真实的 Claude Code 终端界面，工作目录就是本会话的工作区" width="100%">
+<img src="https://raw.githubusercontent.com/dshworks/dsh-crew/main/docs/crew-dark.png" alt="dsh Web UI 中 Chat 和 Trajectory 旁边打开的团队标签页：入座栏里列着 Claude Code 和 Codex，一个面板里跑着真实的 Claude Code 终端界面，工作目录就是本会话的工作区" width="100%">
 
 </td>
 </tr>

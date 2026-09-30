@@ -37,7 +37,7 @@ every keystroke of it, and you can type into any pane at any moment.
 </td>
 <td width="60%" valign="top">
 
-<img src="https://raw.githubusercontent.com/dshworks/dsh-crew/main/docs/crew-dark.png" alt="The dsh Web UI with a Crew tab open beside Chat and Trajectory: a seat bar offering Claude Code, Codex, and dsh, and a real Claude Code terminal UI running in a pane in the session's workspace" width="100%">
+<img src="https://raw.githubusercontent.com/dshworks/dsh-crew/main/docs/crew-dark.png" alt="The dsh Web UI with a Crew tab open beside Chat and Trajectory: a seat bar offering Claude Code and Codex, and a real Claude Code terminal UI running in a pane in the session's workspace" width="100%">
 
 </td>
 </tr>

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.4 — 2026-09-30
+
+- **No more `dsh` seat.** The built-in `dsh` row spawned bare `dsh`, which
+  exits with `--profile <name> is required`. dsh has required a profile
+  since before it launched, and it ships no terminal profile to seat (acp,
+  web, headless, sdk), so that button has never started anything. The row
+  is gone from the roster, the seat bar, the README and the hero. An
+  `agents:` row with `id: dsh` still works if you have something to seat.
+- Checked on dsh 0.2.0-rc.2 (npm `latest` since 2026-09-29): the published
+  0.2.3 installs through dsh's gate and its Crew tab, panes and `crew_*`
+  tools work unchanged.
+
 ## 0.2.3 — 2026-09-29
 
 - **Works on dsh 0.1.7 and 0.2.0.** The harness peers are now

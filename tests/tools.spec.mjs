@@ -122,7 +122,7 @@ describe('the crew tools', () => {
   })
 
   it('names the crew members it knows when asked for one it does not', async () => {
-    await expect(call('crew_seat', { agent: 'nobody' })).rejects.toThrow(/available: claude, codex, dsh, shell/)
+    await expect(call('crew_seat', { agent: 'nobody' })).rejects.toThrow(/available: claude, codex, shell/)
   })
 
   it('refuses to seat anything for a session with no workspace', async () => {
